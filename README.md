@@ -189,7 +189,7 @@ Build and launch on a connected Flipper:
 ZEROFIDO_PROFILE=usb uv run python -m ufbt launch
 ```
 
-The normal build output is `dist/zerofido.fap`.
+The normal build output is `dist/flipper_vault.fap`.
 
 ### Validation
 
@@ -229,7 +229,7 @@ Check and package a built `.fap` with the release export gate:
 
 ```bash
 uv run python host_tools/check_symbol_gate.py \
-  --fap dist/zerofido.fap \
+  --fap dist/flipper_vault.fap \
   --output-fap dist/zerofido-release.fap
 ```
 
@@ -281,7 +281,7 @@ uv run python tools/flipper_crash_log.py --port auto --output .tmp/flipper-crash
 Print firmware footprint data after building:
 
 ```bash
-uv run python host_tools/size_ledger.py --artifact dist/zerofido.fap --artifact dist/zerofido-release.fap
+uv run python host_tools/size_ledger.py --artifact dist/flipper_vault.fap --artifact dist/zerofido-release.fap
 ```
 
 ### Release Packaging
@@ -295,12 +295,12 @@ ZEROFIDO_RELEASE_DIAGNOSTICS=0 \
 uv run python host_tools/package_release.py
 ```
 
-Package an existing `dist/zerofido.fap` without rebuilding:
+Package an existing `dist/flipper_vault.fap` without rebuilding:
 
 ```bash
 uv run python host_tools/package_release.py \
   --skip-build \
-  --fap dist/zerofido.fap \
+  --fap dist/flipper_vault.fap \
   --output-fap dist/zerofido-release.fap
 ```
 

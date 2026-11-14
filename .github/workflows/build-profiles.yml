@@ -64,7 +64,7 @@ jobs:
           uv run python host_tools/package_release.py
           --skip-build
           --allow-prebuilt-input
-          --fap dist/zerofido.fap
+          --fap dist/flipper_vault.fap
           --output-fap dist/zerofido-${{ matrix.profile }}-release.fap
 
       - name: Upload FAP artifacts

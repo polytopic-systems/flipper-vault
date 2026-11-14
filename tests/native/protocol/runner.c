@@ -1631,6 +1631,8 @@ int main(void) {
     test_get_info_advertises_hmac_secret_extension();
     test_get_info_advertises_fido_2_0_without_fido_2_1();
     test_get_info_nfc_ctap2_0_advertises_transport_compactly();
+    test_get_info_ble_advertises_ble_transport();
+    test_runtime_ble_capabilities_follow_build_flag();
     test_get_info_experimental_2_1_advertises_pin_uv_auth_token();
     test_get_info_advertises_u2f();
     test_get_info_reports_firmware_version();

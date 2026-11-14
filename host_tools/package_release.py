@@ -61,7 +61,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--fap",
         type=Path,
-        default=Path("dist/zerofido.fap"),
+        default=Path("dist/flipper_vault.fap"),
         help="UFBT output FAP to package",
     )
     parser.add_argument(

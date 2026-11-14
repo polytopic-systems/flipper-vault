@@ -995,7 +995,7 @@ bool storage_dir_exists(Storage *storage, const char *path) {
     if (strcmp(path, "/ext/apps_data") == 0) {
         return g_storage_root_exists;
     }
-    if (strcmp(path, "/ext/apps_data/zerofido") == 0) {
+    if (strcmp(path, "/ext/apps_data/flipper_vault") == 0) {
         return g_storage_app_data_exists;
     }
     return false;
@@ -1007,7 +1007,7 @@ bool storage_simply_mkdir(Storage *storage, const char *path) {
         g_storage_root_exists = true;
         return true;
     }
-    if (strcmp(path, "/ext/apps_data/zerofido") == 0) {
+    if (strcmp(path, "/ext/apps_data/flipper_vault") == 0) {
         g_storage_app_data_exists = true;
         return true;
     }
@@ -1059,7 +1059,7 @@ bool storage_file_open(File *file, const char *path, FS_AccessMode access_mode,
                        FS_OpenMode open_mode) {
     TestStorageFile *slot = NULL;
 
-    if (strncmp(path, "/ext/apps_data/zerofido/", strlen("/ext/apps_data/zerofido/")) == 0 &&
+    if (strncmp(path, "/ext/apps_data/flipper_vault/", strlen("/ext/apps_data/flipper_vault/")) == 0 &&
         !g_storage_app_data_exists) {
         return false;
     }

@@ -15,7 +15,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_ARTIFACTS = (
-    Path("dist/zerofido.fap"),
+    Path("dist/flipper_vault.fap"),
     Path("dist/zerofido-release.fap"),
     Path("dist/zerofido-usb-diagnostics.fap"),
     Path("dist/zerofido-nfc-diagnostics.fap"),

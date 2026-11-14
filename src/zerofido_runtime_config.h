@@ -28,6 +28,8 @@ typedef struct ZerofidoApp ZerofidoApp;
 typedef enum {
     ZfTransportModeUsbHid = 0,
     ZfTransportModeNfc = 1,
+    /* Bluetooth LE (CTAP BLE). Valid only in builds with ZF_BLE_ENABLED. */
+    ZfTransportModeBle = 2,
 } ZfTransportMode;
 
 typedef enum {
@@ -53,6 +55,7 @@ typedef struct {
 typedef struct {
     bool usb_hid_enabled;
     bool nfc_enabled;
+    bool ble_enabled;
     bool fido2_enabled;
     bool u2f_enabled;
     bool client_pin_enabled;
@@ -70,6 +73,7 @@ typedef struct {
     bool make_cred_uv_not_required;
     bool advertise_usb_transport;
     bool advertise_nfc_transport;
+    bool advertise_ble_transport;
     bool auto_accept_requests;
     ZfAttestationMode attestation_mode;
 } ZfResolvedCapabilities;
@@ -91,6 +95,8 @@ bool zf_runtime_config_set_fido2_profile(ZerofidoApp *app, Storage *storage,
 bool zf_runtime_config_set_attestation_mode(ZerofidoApp *app, Storage *storage,
                                             ZfAttestationMode mode);
 bool zf_runtime_config_set_transport_mode(ZerofidoApp *app, Storage *storage, ZfTransportMode mode);
+/* True if this build can run the given transport mode (profile and BLE flags). */
+bool zf_runtime_config_transport_mode_supported(ZfTransportMode mode);
 void zf_runtime_config_resolve_capabilities(const ZfRuntimeConfig *config,
                                             ZfResolvedCapabilities *capabilities);
 void zf_runtime_get_effective_capabilities(const ZerofidoApp *app,

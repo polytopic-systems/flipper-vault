@@ -22,7 +22,7 @@
 #include <stdint.h>
 
 #define ZF_AAGUID_LEN 16
-#define ZF_APP_ID "zerofido"
+#define ZF_APP_ID "flipper_vault"
 #define ZF_APP_DATA_ROOT "/ext/apps_data"
 #define ZF_APP_DATA_DIR ZF_APP_DATA_ROOT "/" ZF_APP_ID
 
@@ -48,6 +48,16 @@
 
 #ifndef ZF_PACKED_ATTESTATION
 #define ZF_PACKED_ATTESTATION 0
+#endif
+
+/* Bluetooth LE FIDO transport; application.fam enables it in the full profile only. */
+#ifndef ZF_BLE_ENABLED
+#define ZF_BLE_ENABLED 0
+#endif
+
+/* Development builds can make Bluetooth the first-launch transport (keeps the USB CLI up). */
+#ifndef ZF_DEV_DEFAULT_BLE
+#define ZF_DEV_DEFAULT_BLE 0
 #endif
 
 #ifndef ZF_HAS_SETTINGS_UI
