@@ -18,10 +18,11 @@
 
 #include "vault_gfx.h"
 
+uint32_t vault_hash32(uint32_t x);
+
 /*
- * Deterministic 1-bit sigil per passkey: a mirrored 5x5 glyph (from the
- * credential ID) inside a notched seal ring (from the site), so passkeys of
- * the same site share a ring and every passkey has its own mark. It is a
+ * Deterministic 1-bit sigil per passkey: a mirrored 5x5 glyph hashed from
+ * the credential ID and the site, so each passkey keeps its own mark. It is a
  * visual aid only, not a security check.
  */
 #define VAULT_SIGIL_SEED_LEN 8U
@@ -32,9 +33,6 @@ typedef struct {
 
 void vault_sigil_seed(VaultSigilSeed *seed, const uint8_t *credential_id, size_t credential_id_len,
                       const uint8_t *site, size_t site_len);
-/* 15x15 glyph at (x, y); `scale` 1 or 2. */
+/* 15x15 glyph at (x, y), `scale` 1 or 2, in the canvas' current color. */
 void vault_sigil_draw(Canvas *canvas, int32_t x, int32_t y, int32_t scale,
-                      const VaultSigilSeed *seed, VgMode mode);
-/* Glyph (scale 2) inside a notched seal: a disc of radius 19 centred on (cx, cy). */
-void vault_sigil_draw_seal(Canvas *canvas, int32_t cx, int32_t cy, const VaultSigilSeed *seed,
-                           int32_t turn);
+                      const VaultSigilSeed *seed);

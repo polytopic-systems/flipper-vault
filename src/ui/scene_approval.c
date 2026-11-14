@@ -16,214 +16,140 @@
 
 #include "scene.h"
 
+#include <gui/elements.h>
 #include <stdio.h>
 
 /*
  * Approval prompt. While asking, what is being approved (site, account) is
- * drawn plainly and first; decoration stays at the edges. The outcome
- * animation only starts after the result has been handed to the protocol
- * layer, so it never delays it.
+ * drawn plainly and first; decoration stays at the edges. The outcome plays
+ * only after the result has been handed to the protocol layer.
  */
 
-#define KNOCK_PERIOD_MS 1600U
-#define KNOCK_MS 260U
+#define APPROVAL_TIMEOUT_MS 30000
 
-static int32_t approval_knock(uint32_t now, uint32_t shown_at, int32_t stagger) {
-    uint32_t phase = (now - shown_at + (uint32_t)stagger) % KNOCK_PERIOD_MS;
-    if (phase >= KNOCK_MS) return 0;
-    /* A sharp rap, then settle. */
-    int32_t t = (int32_t)((phase * VG_ONE) / KNOCK_MS);
-    return (vg_sin((t * 128) / VG_ONE) * 2) / VG_ONE;
-}
-
+/* Bolts on both edges rap twice every 1.6 s while the prompt waits. */
 static void approval_draw_rails(Canvas *canvas, const VaultApprovalModel *m) {
-    /* Bolt rails on both edges: the door is locked and something is knocking. */
-    for (int32_t side = 0; side < 2; ++side) {
-        int32_t x = side ? 125 : 2;
-        vg_vline(canvas, side ? 127 : 0, 13, 51, VgSet);
-        for (int32_t i = 0; i < 3; ++i) {
-            int32_t k = approval_knock(m->now, m->shown_at, i * 60 + side * 30);
-            int32_t bx = side ? x - k : x + k;
-            int32_t by = 19 + i * 13;
-            vg_disc(canvas, bx, by, 1, VgSet);
-            vg_hline(canvas, side ? bx + 1 : 0, side ? 127 : bx - 1, by, VgSet);
-        }
+    uint32_t phase = (m->now - m->shown_at) % 1600U;
+    int32_t knock = phase < 120U ? 2 : (phase >= 220U && phase < 340U) ? 1 : 0;
+    canvas_draw_line(canvas, 0, 14, 0, 51);
+    canvas_draw_line(canvas, 127, 14, 127, 51);
+    for (int32_t i = 0; i < 3; ++i) {
+        int32_t y = 19 + i * 13;
+        canvas_draw_box(canvas, 0, y - 1, 2 + knock, 3);
+        canvas_draw_box(canvas, 126 - knock, y - 1, 2 + knock, 3);
     }
 }
 
 static void approval_draw_asking(Canvas *canvas, const VaultApprovalModel *m) {
-    char right[8];
-    int32_t left_ms = (int32_t)(m->deadline - m->now);
-    if (left_ms < 0) left_ms = 0;
+    char right[16];
+    int32_t left_ms = vg_clamp((int32_t)(m->deadline - m->now), 0, APPROVAL_TIMEOUT_MS);
     snprintf(right, sizeof(right), "%lds", (long)((left_ms + 999) / 1000));
     scene_title_bar(canvas, m->u2f ? VaultIconKey : VaultIconLock, m->header, right);
-
-    /* Countdown as a draining line under the title. */
-    if (m->timeout_ms) {
-        int32_t w = (left_ms * 124) / (int32_t)m->timeout_ms;
-        vg_hline(canvas, 2, 2 + w, 12, VgSet);
-    }
-
+    /* Countdown drains under the title. */
+    canvas_draw_line(canvas, 2, 12, 2 + (left_ms * 123) / APPROVAL_TIMEOUT_MS, 12);
     approval_draw_rails(canvas, m);
 
-    /* Site first, large; account second. Nothing is ever cut from either. */
-    scene_icon(canvas, 6, 19, VaultIconGlobe, VgSet);
-    uint8_t lines = vt_fit_label(canvas, 69, 26, 104, m->site, m->now, true);
+    /* Site first and large; account second. Nothing is ever cut from either. */
+    scene_icon(canvas, 5, 19, VaultIconGlobe);
+    uint8_t lines = vt_fit_label(canvas, 68, 26, 104, m->site, m->now, true);
     int32_t ay = lines == 2 ? 44 : 41;
-    scene_icon(canvas, 6, ay - 7, VaultIconUser, VgSet);
+    scene_icon(canvas, 5, ay - 7, VaultIconUser);
+    vt_fit_label(canvas, 68, ay, 104, m->account, m->now, false);
+
     canvas_set_font(canvas, FontSecondary);
-    vt_fit_label(canvas, 69, ay, 104, m->account, m->now, false);
-
-    /* Keys. The dial in the middle wobbles with the knock. */
-    scene_hint(canvas, 4, "<", "Deny", false);
-    scene_hint(canvas, 124, "OK", "Approve", true);
-    int32_t wob = approval_knock(m->now, m->shown_at, 0) * 40;
-    vault_dial_badge(canvas, 58, 58, 5, (int32_t)((m->now - m->shown_at) / 8U) + wob);
-
-    /* Input is armed shortly after the prompt appears: show the keys arming. */
+    elements_button_left(canvas, "Deny");
+    elements_button_center(canvas, "Approve");
+    /* Keys stay greyed until input is armed. */
     if ((m->now - m->shown_at) < VAULT_APPROVAL_ARM_MS) {
-        int32_t t = vg_progress(m->now, m->shown_at, VAULT_APPROVAL_ARM_MS);
-        vg_fade(canvas, 0, 53, VG_W, 11, 16 - (t * 16) / VG_ONE);
+        vg_dither(canvas, 0, 52, VG_W, 12, 8, false);
     }
 }
 
-static void approval_draw_label(Canvas *canvas, const char *text, int32_t t, bool check) {
-    /* Stamp: a black plate that pops open with the result on it. */
-    int32_t h = (vg_ease_out_back(t) * 15) / VG_ONE;
-    if (h <= 0) return;
-    int32_t w = 92;
-    vg_rfill(canvas, 64 - w / 2, 48 - h / 2, w, h, VgSet);
+static void approval_draw_stamp(Canvas *canvas, const char *text, int32_t t) {
+    /* A black plate that pops open with the result on it. */
+    int32_t h = (vg_ease_back(t) * 15) / VG_ONE;
+    if (h <= 2)
+        return;
+    canvas_set_color(canvas, ColorBlack);
+    canvas_draw_rbox(canvas, 18, 48 - h / 2, 92, h, 2);
     if (h >= 12) {
         canvas_set_color(canvas, ColorWhite);
         canvas_set_font(canvas, FontPrimary);
-        int32_t tw = canvas_string_width(canvas, text) + (check ? 10 : 0);
-        int32_t x = 64 - tw / 2;
-        if (check) {
-            vg_line(canvas, x, 48, x + 2, 50, VgClear);
-            vg_line(canvas, x + 2, 50, x + 6, 45, VgClear);
-            vg_line(canvas, x, 47, x + 2, 49, VgClear);
-            vg_line(canvas, x + 2, 49, x + 6, 44, VgClear);
-            x += 10;
-        }
-        vt_str(canvas, x, 52, text);
-        canvas_set_color(canvas, ColorBlack);
+        canvas_draw_str_aligned(canvas, 64, 52, AlignCenter, AlignBottom, text);
     }
-}
-
-static void approval_draw_approved(Canvas *canvas, const VaultApprovalModel *m) {
-    const uint32_t t0 = m->outcome_at;
-    VaultDoor door;
-    int32_t grow = vg_ease_out_back(vg_progress(m->now, t0, 220));
-    int32_t r = vg_lerp(6, 30, grow);
-    int32_t cy = vg_lerp(58, 32, vg_ease_out_cubic(vg_progress(m->now, t0, 220)));
-
-    if (m->now - t0 < 160U) {
-        /* The prompt dissolves as the dial grows into the door. */
-        approval_draw_asking(canvas, m);
-        vg_fade(canvas, 0, 0, VG_W, VG_H, (int32_t)((m->now - t0) * 17U / 160U));
-    }
-    vault_door_init(&door, 64, cy, r);
-    /* Dial spins the combination, bolts withdraw one by one, door swings, light pours. */
-    door.dial = (vg_ease_in_out(vg_progress(m->now, t0 + 200U, 420)) * 3) / 2;
-    door.handle = vg_ease_in_out(vg_progress(m->now, t0 + 420U, 260)) / 3;
-    for (int i = 0; i < VAULT_DOOR_BOLTS; ++i) {
-        uint32_t start = t0 + 260U + (uint32_t)i * 40U;
-        door.bolt[i] = VG_ONE - vg_ease_out_cubic(vg_progress(m->now, start, 120));
-    }
-    door.swing = vg_ease_in_cubic(vg_progress(m->now, t0 + 680U, 300));
-    door.light = vg_ease_out_cubic(vg_progress(m->now, t0 + 740U, 260));
-    vault_door_draw(canvas, &door);
-
-    /* The light bursts out and washes the screen. */
-    int32_t burst = vg_ease_in_cubic(vg_progress(m->now, t0 + 950U, 220));
-    if (burst > 0) {
-        int32_t br = (burst * 80) / VG_ONE;
-        vg_disc(canvas, 64, 32, br, VgClear);
-        for (int32_t a = 0; a < 256; a += 16) {
-            int32_t x0, y0, x1, y1;
-            vg_polar(64, 32, (br + 2) * 16, a + (int32_t)(m->now / 20U) % 16, &x0, &y0);
-            vg_polar(64, 32, (br + 10) * 16, a + (int32_t)(m->now / 20U) % 16, &x1, &y1);
-            vg_line(canvas, x0, y0, x1, y1, VgClear);
-        }
-    }
-    int32_t settle = vg_progress(m->now, t0 + 1150U, 260);
-    if (settle > 0) {
-        vg_fill(canvas, 0, 0, VG_W, VG_H, VgClear);
-        /* An open vault: the door ajar on its hinge, rays from the doorway. */
-        VaultDoor open;
-        vault_door_init(&open, 64, 24, 20);
-        open.swing = 820;
-        open.light = VG_ONE;
-        int32_t rise = vg_ease_out_cubic(settle);
-        vg_set_offset(0, (VG_ONE - rise) * 6 / VG_ONE);
-        vault_door_draw(canvas, &open);
-        for (int32_t a = 0; a < 256; a += 32) {
-            int32_t x0, y0, x1, y1;
-            vg_polar(64, 24, 23 * 16, a + 16, &x0, &y0);
-            vg_polar(64, 24, (23 + (rise * 5) / VG_ONE) * 16, a + 16, &x1, &y1);
-            vg_line(canvas, x0, y0, x1, y1, VgSet);
-        }
-        vg_set_offset(0, 0);
-        approval_draw_label(canvas, "Approved", settle, true);
-    }
-}
-
-static void approval_draw_closed(Canvas *canvas, const VaultApprovalModel *m) {
-    const uint32_t t0 = m->outcome_at;
-    const char *label = m->phase == VaultApprovalTimedOut ? "Timed out" :
-                        m->phase == VaultApprovalCanceled ? "Canceled" :
-                                                            "Denied";
-    VaultDoor door;
-    uint32_t e = m->now - t0;
-
-    vault_door_init(&door, 64, 32, 30);
-    door.swing = VG_ONE - vg_ease_in_cubic(vg_progress(m->now, t0 + 120U, 230));
-    for (int i = 0; i < VAULT_DOOR_BOLTS; ++i) {
-        door.bolt[i] = vg_ease_out_back(vg_progress(m->now, t0 + 350U, 140));
-    }
-    /* A timeout winds the dial down slowly; a denial spins it hard. */
-    door.dial = m->phase == VaultApprovalTimedOut ?
-                    -vg_ease_out_cubic(vg_progress(m->now, t0 + 350U, 700)) / 2 :
-                    -vg_ease_out_bounce(vg_progress(m->now, t0 + 350U, 500));
-    if (e >= 350U && e < 650U) {
-        int32_t k = (int32_t)(650U - e) / 60;
-        vg_set_offset((e / 33U) % 2U ? k : -k, (e / 50U) % 2U ? 1 : 0);
-    }
-    vault_door_draw(canvas, &door);
-    vg_set_offset(0, 0);
-    if (e < 120U) {
-        /* Fade from the prompt into the scene. */
-        vg_fade(canvas, 0, 0, VG_W, VG_H, 16 - (int32_t)(e * 16U / 120U));
-    }
-    if (e >= 350U && e < 390U) vg_invert(canvas, 0, 0, VG_W, VG_H);
-    approval_draw_label(canvas, label, vg_progress(m->now, t0 + 600U, 260), false);
+    canvas_set_color(canvas, ColorBlack);
 }
 
 void scene_approval_draw(Canvas *canvas, const VaultApprovalModel *m) {
+    const uint32_t t0 = m->outcome_at;
+    const uint32_t e = m->now - t0;
+    VaultDoor door;
+
     canvas_set_color(canvas, ColorBlack);
-    switch (m->phase) {
-    case VaultApprovalAsking:
+    if (m->phase == VaultApprovalAsking) {
         approval_draw_asking(canvas, m);
-        break;
-    case VaultApprovalApproved:
-        approval_draw_approved(canvas, m);
-        break;
-    case VaultApprovalDenied:
-    case VaultApprovalTimedOut:
-    case VaultApprovalCanceled:
-    default:
-        approval_draw_closed(canvas, m);
-        break;
+        return;
+    }
+
+    vault_door_init(&door, 64, 32, 30);
+    if (m->phase == VaultApprovalApproved) {
+        /* Dial spins the combination, bolts withdraw in turn, door swings, light pours. */
+        door.dial = (vg_ease_out(vg_progress(m->now, t0, 450)) * 3) / 2;
+        for (int i = 0; i < VAULT_DOOR_BOLTS; ++i) {
+            door.bolt[i] = VG_ONE - vg_ease_out(vg_progress(m->now, t0 + 150U + i * 40U, 120));
+        }
+        door.swing = vg_ease_in(vg_progress(m->now, t0 + 560U, 300));
+        door.light = vg_ease_out(vg_progress(m->now, t0 + 620U, 260));
+        vault_door_draw(canvas, &door);
+        if (e < 100U)
+            vg_dither(canvas, 0, 0, VG_W, VG_H, 16 - (int32_t)(e / 6U), false);
+        /* The light bursts out and washes the screen. */
+        int32_t burst = vg_ease_in(vg_progress(m->now, t0 + 860U, 220));
+        if (burst > 0) {
+            canvas_set_color(canvas, ColorWhite);
+            canvas_draw_disc(canvas, 64, 32, (burst * 76) / VG_ONE);
+        }
+        int32_t seal = vg_ease_back(vg_progress(m->now, t0 + 1000U, 260));
+        if (seal > 0) {
+            /* Seal of approval: a ring with a check, settling in. */
+            int32_t r = (seal * 15) / VG_ONE;
+            canvas_set_color(canvas, ColorBlack);
+            canvas_draw_circle(canvas, 64, 23, r);
+            canvas_draw_circle(canvas, 64, 23, r > 2 ? r - 2 : 0);
+            for (int32_t k = 0; k < 3 && r >= 12; ++k) {
+                canvas_draw_line(canvas, 57, 23 + k, 62, 28 + k);
+                canvas_draw_line(canvas, 62, 28 + k, 71, 18 + k);
+            }
+        }
+        approval_draw_stamp(canvas, "Approved", vg_progress(m->now, t0 + 1000U, 260));
+    } else {
+        /* The door slams shut, bolts shoot home, the frame shakes. */
+        door.swing = VG_ONE - vg_ease_in(vg_progress(m->now, t0 + 80U, 230));
+        for (int i = 0; i < VAULT_DOOR_BOLTS; ++i) {
+            door.bolt[i] = vg_ease_back(vg_progress(m->now, t0 + 310U, 140));
+        }
+        door.dial = m->phase == VaultApprovalTimedOut
+                        ? -vg_ease_out(vg_progress(m->now, t0 + 310U, 700)) / 2
+                        : -vg_ease_back(vg_progress(m->now, t0 + 310U, 400));
+        if (e >= 310U && e < 610U)
+            door.cx += ((e / 33U) % 2U ? 1 : -1) * (int32_t)(610U - e) / 60;
+        vault_door_draw(canvas, &door);
+        if (e < 80U)
+            vg_dither(canvas, 0, 0, VG_W, VG_H, 16 - (int32_t)(e / 5U), false);
+        if (e >= 310U && e < 350U) {
+            canvas_set_color(canvas, ColorXOR);
+            canvas_draw_box(canvas, 0, 0, VG_W, VG_H);
+        }
+        approval_draw_stamp(canvas,
+                            m->phase == VaultApprovalTimedOut   ? "Timed out"
+                            : m->phase == VaultApprovalCanceled ? "Canceled"
+                                                                : "Denied",
+                            vg_progress(m->now, t0 + 560U, 260));
     }
 }
 
 uint32_t scene_approval_outcome_ms(VaultApprovalPhase phase) {
-    switch (phase) {
-    case VaultApprovalAsking:
-        return 0;
-    case VaultApprovalApproved:
-        return VAULT_APPROVAL_OPEN_MS;
-    default:
-        return VAULT_APPROVAL_SLAM_MS;
-    }
+    return phase == VaultApprovalAsking     ? 0U
+           : phase == VaultApprovalApproved ? VAULT_APPROVAL_OPEN_MS
+                                            : VAULT_APPROVAL_SLAM_MS;
 }

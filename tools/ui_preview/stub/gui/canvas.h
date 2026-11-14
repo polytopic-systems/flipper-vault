@@ -55,5 +55,10 @@ void canvas_draw_rbox(Canvas *canvas, int32_t x, int32_t y, size_t width, size_t
 void canvas_draw_rframe(Canvas *canvas, int32_t x, int32_t y, size_t width, size_t height,
                         size_t radius);
 
+void canvas_draw_circle(Canvas *canvas, int32_t x, int32_t y, size_t radius);
+void canvas_draw_disc(Canvas *canvas, int32_t x, int32_t y, size_t radius);
+void canvas_draw_xbm(Canvas *canvas, int32_t x, int32_t y, size_t width, size_t height,
+                     const uint8_t *bitmap);
+
 /* Host-only: the preview's single canvas. */
 Canvas *preview_canvas(void);

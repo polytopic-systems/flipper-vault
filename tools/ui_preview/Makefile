@@ -8,7 +8,7 @@ CC ?= cc
 CFLAGS := -std=gnu11 -O2 -Wall -Wextra -Werror -Wno-unused-parameter \
 	-Istub -I$(BUILD) -I$(ROOT)/src/ui -DZF_UI_PREVIEW=1
 UI_SRC := $(ROOT)/src/ui/vault_gfx.c $(ROOT)/src/ui/vault_door.c \
-	$(wildcard $(ROOT)/src/ui/vault_sigil.c) $(wildcard $(ROOT)/src/ui/scene_*.c)
+	$(ROOT)/src/ui/vault_sigil.c $(wildcard $(ROOT)/src/ui/scene_*.c)
 SRC := main.c recorder.c canvas_stub.c $(UI_SRC)
 UV := uv run --no-project
 PY := $(UV) python -I

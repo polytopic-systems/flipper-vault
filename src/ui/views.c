@@ -30,6 +30,8 @@
 #include "../zerofido_store.h"
 #include "../zerofido_ui_i.h"
 #include "status.h"
+#include "scene.h"
+#include "vault_anim.h"
 #include "../app/lifecycle.h"
 
 #if !defined(ZF_USB_ONLY) && !defined(ZF_NFC_ONLY)
@@ -56,7 +58,8 @@
 #define ZF_SETTINGS_FIRST_ITEM ZfSettingsItemPin
 #endif
 
-#if ZF_HAS_TRANSPORT_SETTING || ZF_AUTO_ACCEPT_REQUESTS || ZF_DEV_FIDO2_1 || ZF_HAS_ATTESTATION_SETTING
+#if ZF_HAS_TRANSPORT_SETTING || ZF_AUTO_ACCEPT_REQUESTS || ZF_DEV_FIDO2_1 ||                       \
+    ZF_HAS_ATTESTATION_SETTING
 #define ZF_SETTINGS_USES_RUNTIME_CONFIG 1
 #else
 #define ZF_SETTINGS_USES_RUNTIME_CONFIG 0
@@ -109,6 +112,7 @@ enum {
     ZfSettingsItemAttestation = 3,
     ZfSettingsItemPin = 4,
     ZfSettingsItemStartupReset = 5,
+    ZfSettingsItemAbout = 6,
 };
 
 enum {
@@ -123,12 +127,7 @@ typedef struct {
     uint8_t store_io[ZF_STORE_RECORD_IO_SIZE];
 } ZfCredentialDisplayScratch;
 
-typedef struct {
-    bool allow_delete;
-    char website[ZF_MAX_RP_ID_LEN];
-    char account[ZF_MAX_DISPLAY_NAME_LEN];
-    char type[24];
-} ZfCredentialDetailModel;
+typedef VaultDetailModel ZfCredentialDetailModel;
 
 _Static_assert(sizeof(ZfCredentialDisplayScratch) <= ZF_UI_SCRATCH_SIZE,
                "credential display scratch exceeds UI arena");
@@ -157,13 +156,19 @@ void zerofido_ui_switch_to_view(ZerofidoApp *app, ZfViewId view_id) {
         return;
     }
 
+    ZfViewId previous = ZfViewCount;
     furi_mutex_acquire(app->ui_mutex, FuriWaitForever);
     registered = (app->ui_registered_views & (1U << view_id)) != 0;
     if (registered) {
+        previous = app->active_view;
         app->active_view = view_id;
         dispatcher = app->view_dispatcher;
     }
     furi_mutex_release(app->ui_mutex);
+
+    if (dispatcher && previous != view_id) {
+        vault_anim_poke();
+    }
 
     if (dispatcher) {
         view_dispatcher_switch_to_view(dispatcher, view_id);
@@ -438,7 +443,7 @@ static void zerofido_refresh_settings_menu(ZerofidoApp *app) {
 #if ZF_HAS_TRANSPORT_SETTING
     char transport_label[24];
     snprintf(transport_label, sizeof(transport_label), "Transport: %s",
-             runtime_config.transport_mode == ZfTransportModeNfc ? "NFC" : "USB HID");
+             zf_transport_mode_short_name(runtime_config.transport_mode));
     submenu_add_item(app->settings_menu, transport_label, ZfSettingsItemTransport,
                      zerofido_settings_menu_callback, app);
 #endif
@@ -465,8 +470,10 @@ static void zerofido_refresh_settings_menu(ZerofidoApp *app) {
     if (startup_reset_available) {
         submenu_add_item(app->settings_menu, "Reset app data", ZfSettingsItemStartupReset,
                          zerofido_settings_menu_callback, app);
-        max_index = ZfSettingsItemStartupReset;
     }
+    submenu_add_item(app->settings_menu, "About", ZfSettingsItemAbout,
+                     zerofido_settings_menu_callback, app);
+    max_index = ZfSettingsItemAbout;
     if (app->settings_selected_index < min_index || app->settings_selected_index > max_index) {
         app->settings_selected_index = min_index;
     }
@@ -642,99 +649,76 @@ static void zerofido_refresh_credentials_menu(ZerofidoApp *app) {
     submenu_set_selected_item(app->credentials_menu, selected_menu_index);
 }
 
-static void zerofido_copy_label(char *out, size_t out_size, const char *text) {
-    if (!out || out_size == 0U) {
-        return;
-    }
-
-    snprintf(out, out_size, "%s", (text && text[0]) ? text : "-");
-}
-
 static void zerofido_fill_credential_detail_model(ZerofidoApp *app,
                                                   const ZfCredentialIndexEntry *entry,
-                                                  ZfCredentialDetailModel *model) {
+                                                  VaultDetailModel *model) {
     ZfCredentialDisplayScratch *scratch = NULL;
-    const char *website = NULL;
-    const char *user = NULL;
-    const char *type = NULL;
+    const ZfCredentialRecord *record = NULL;
 
-    if (model) {
-        memset(model, 0, sizeof(*model));
-    }
-    if (!model) {
+    snprintf(model->website, sizeof(model->website), "Passkey unavailable");
+    snprintf(model->account, sizeof(model->account), "-");
+    snprintf(model->type, sizeof(model->type), "-");
+    if (!app || !entry || !entry->in_use) {
         return;
     }
-    if (!entry || !entry->in_use) {
-        goto unavailable;
-    }
-
-    if (!app) {
-        goto unavailable;
-    }
+    zf_status_sigil_seed(entry, &model->seed);
     scratch = zerofido_ui_scratch_alloc(app, sizeof(*scratch));
     if (!scratch) {
-        goto unavailable;
+        return;
     }
-
-    if (!zf_store_load_record_for_display_with_buffer(
+    if (zf_store_load_record_for_display_with_buffer(
             app->storage, entry, &scratch->record, scratch->store_io, sizeof(scratch->store_io))) {
-        zerofido_ui_scratch_free(app, scratch, sizeof(*scratch));
-        goto unavailable;
+        record = &scratch->record;
+        scene_copy(model->website, sizeof(model->website),
+                   record->rp_id[0] ? record->rp_id : "Unknown website");
+        scene_copy(model->account, sizeof(model->account),
+                   record->user_display_name[0] ? record->user_display_name
+                   : record->user_name[0]       ? record->user_name
+                                                : "No account name");
+        snprintf(model->type, sizeof(model->type), "%s",
+                 record->resident_key ? "Discoverable" : "Saved passkey");
     }
-
-    scratch->record.sign_count = entry->sign_count;
-    website = scratch->record.rp_id[0] ? scratch->record.rp_id : "Unknown website";
-    if (scratch->record.user_display_name[0]) {
-        user = scratch->record.user_display_name;
-    } else if (scratch->record.user_name[0]) {
-        user = scratch->record.user_name;
-    } else {
-        user = "No account name";
-    }
-    type = scratch->record.resident_key ? "Discoverable (RK)" : "Saved passkey";
-
-    zerofido_copy_label(model->website, sizeof(model->website), website);
-    zerofido_copy_label(model->account, sizeof(model->account), user);
-    zerofido_copy_label(model->type, sizeof(model->type), type);
     zerofido_ui_scratch_free(app, scratch, sizeof(*scratch));
-    return;
-
-unavailable:
-    zerofido_copy_label(model->website, sizeof(model->website), "Passkey unavailable");
-    zerofido_copy_label(model->account, sizeof(model->account), "-");
-    zerofido_copy_label(model->type, sizeof(model->type), "-");
 }
 
 static void zerofido_refresh_credential_detail(ZerofidoApp *app) {
-    ZfCredentialDetailModel snapshot = {0};
+    ZfCredentialDetailModel snapshot;
     ZfCredentialIndexEntry selected_entry = {0};
-    bool allow_delete = false;
+    bool valid = false;
 
     if (!zerofido_ui_ensure_view(app, ZfViewCredentialDetail)) {
         return;
     }
 
+    memset(&snapshot, 0, sizeof(snapshot));
     furi_mutex_acquire(app->ui_mutex, FuriWaitForever);
-    if (!app->store.records || app->store.count == 0 ||
-        app->credentials_selected_index >= app->store.count ||
-        !app->store.records[app->credentials_selected_index].in_use) {
-        furi_mutex_release(app->ui_mutex);
-        zerofido_copy_label(snapshot.website, sizeof(snapshot.website), "No passkey selected");
-        zerofido_copy_label(snapshot.account, sizeof(snapshot.account), "-");
-        zerofido_copy_label(snapshot.type, sizeof(snapshot.type), "-");
-        with_view_model(app->credential_detail_view, ZfCredentialDetailModel * model,
-                        { *model = snapshot; }, true);
-        return;
+    if (app->store.records && app->credentials_selected_index < app->store.count &&
+        app->store.records[app->credentials_selected_index].in_use) {
+        selected_entry = app->store.records[app->credentials_selected_index];
+        snapshot.allow_delete = app->approval.state != ZfApprovalPending;
+        valid = true;
     }
-
-    selected_entry = app->store.records[app->credentials_selected_index];
-    allow_delete = app->approval.state != ZfApprovalPending;
     furi_mutex_release(app->ui_mutex);
 
-    zerofido_fill_credential_detail_model(app, &selected_entry, &snapshot);
-    snapshot.allow_delete = allow_delete;
-    with_view_model(app->credential_detail_view, ZfCredentialDetailModel * model,
-                    { *model = snapshot; }, true);
+    zerofido_fill_credential_detail_model(app, valid ? &selected_entry : NULL, &snapshot);
+    if (!valid)
+        scene_copy(snapshot.website, sizeof(snapshot.website), "No passkey");
+    with_view_model(
+        app->credential_detail_view, ZfCredentialDetailModel * model, { *model = snapshot; }, true);
+}
+
+static void zerofido_open_about(ZerofidoApp *app) {
+    if (!zerofido_ui_ensure_view(app, ZfViewCredentialDetail)) {
+        return;
+    }
+    with_view_model(
+        app->credential_detail_view, ZfCredentialDetailModel * model,
+        {
+            memset(model, 0, sizeof(*model));
+            model->about = true;
+        },
+        true);
+    zerofido_ui_switch_to_view(app, ZfViewCredentialDetail);
 }
 
 static void zerofido_open_credential_detail(ZerofidoApp *app, uint32_t index) {
@@ -796,12 +780,11 @@ static void zerofido_settings_menu_callback(void *context, uint32_t index) {
     switch (index) {
 #if ZF_HAS_TRANSPORT_SETTING
     case ZfSettingsItemTransport: {
-        ZfTransportMode mode = runtime_config.transport_mode == ZfTransportModeUsbHid
-                                   ? ZfTransportModeNfc
-                                   : ZfTransportModeUsbHid;
+        ZfTransportMode mode = zf_runtime_config_next_transport_mode(runtime_config.transport_mode);
         if (zf_app_lifecycle_set_transport_mode(app, app->storage, mode)) {
-            zerofido_ui_set_status(app, mode == ZfTransportModeNfc ? "Transport: NFC"
-                                                                   : "Transport: USB HID");
+            char status[32];
+            snprintf(status, sizeof(status), "Transport: %s", zf_transport_mode_name(mode));
+            zerofido_ui_set_status(app, status);
         } else {
             zerofido_notify_error(app);
             zerofido_ui_set_status(app, "Transport switch failed");
@@ -869,6 +852,9 @@ static void zerofido_settings_menu_callback(void *context, uint32_t index) {
         break;
     case ZfSettingsItemStartupReset:
         zerofido_open_startup_reset_confirm(app);
+        break;
+    case ZfSettingsItemAbout:
+        zerofido_open_about(app);
         break;
     default:
         break;
@@ -1203,49 +1189,20 @@ static void zerofido_open_delete_credential_confirm(ZerofidoApp *app) {
                                      "This cannot be undone", "Delete");
 }
 
-static void zerofido_draw_auto_scroll_line(Canvas *canvas, FuriString *line, int32_t x, int32_t y,
-                                           size_t width, const char *text) {
-    if (!line) return;
-
-    furi_string_set(line, text ? text : "");
-    elements_scrollable_text_line(canvas, x, y, width, line,
-                                  furi_get_tick() / ZF_CREDENTIAL_DETAIL_SCROLL_TICK_DIVISOR,
-                                  false);
-}
-
-static void zerofido_credential_detail_draw_row(Canvas *canvas, int32_t y, const char *label,
-                                                const char *value, FuriString *scroll_line) {
-    canvas_set_font(canvas, FontSecondary);
-    canvas_draw_str(canvas, 4, y, label);
-    canvas_set_font(canvas, FontPrimary);
-    zerofido_draw_auto_scroll_line(canvas, scroll_line, 30, y, 94U, value);
-}
-
 static void zerofido_credential_detail_draw_callback(Canvas *canvas, void *model) {
     ZfCredentialDetailModel *detail = model;
-    FuriString *scroll_line = NULL;
+    detail->now = furi_get_tick();
+    scene_detail_draw(canvas, detail);
+}
 
-    furi_assert(detail);
-    if (!detail) {
-        return;
-    }
+static void zerofido_credential_detail_enter_callback(void *context) {
+    ZerofidoApp *app = context;
+    vault_anim_bind(app->credential_detail_view, true);
+}
 
-    canvas_clear(canvas);
-    canvas_set_color(canvas, ColorBlack);
-    canvas_set_font(canvas, FontSecondary);
-    canvas_draw_str(canvas, 4, 9, "Passkey");
-    canvas_draw_line(canvas, 0, 12, 127, 12);
-
-    scroll_line = furi_string_alloc();
-    zerofido_credential_detail_draw_row(canvas, 21, "Web", detail->website, scroll_line);
-    zerofido_credential_detail_draw_row(canvas, 34, "Acct", detail->account, scroll_line);
-    zerofido_credential_detail_draw_row(canvas, 47, "Type", detail->type, scroll_line);
-    furi_string_free(scroll_line);
-
-    elements_button_left(canvas, "Back");
-    if (detail->allow_delete) {
-        elements_button_center(canvas, "Delete");
-    }
+static void zerofido_credential_detail_exit_callback(void *context) {
+    ZerofidoApp *app = context;
+    vault_anim_unbind(app->credential_detail_view);
 }
 
 static bool zerofido_credential_detail_input_callback(InputEvent *event, void *context) {
@@ -1259,8 +1216,9 @@ static bool zerofido_credential_detail_input_callback(InputEvent *event, void *c
 
     if (event->key == InputKeyOk) {
         bool allow_delete = false;
-        with_view_model(app->credential_detail_view, ZfCredentialDetailModel * model,
-                        { allow_delete = model->allow_delete; }, false);
+        with_view_model(
+            app->credential_detail_view, ZfCredentialDetailModel * model,
+            { allow_delete = model->allow_delete && !model->about; }, false);
         if (!allow_delete) {
             return true;
         }
@@ -1274,8 +1232,12 @@ static bool zerofido_credential_detail_input_callback(InputEvent *event, void *c
     }
 
     if (event->key == InputKeyLeft) {
+        bool about = false;
+        with_view_model(
+            app->credential_detail_view, ZfCredentialDetailModel * model, { about = model->about; },
+            false);
         zerofido_ui_refresh_status_line(app);
-        zerofido_ui_switch_to_view(app, ZfViewStatus);
+        zerofido_ui_switch_to_view(app, about ? ZfViewSettings : ZfViewStatus);
         return true;
     }
 
@@ -1326,11 +1288,21 @@ static bool zerofido_home_selected_credential(ZerofidoApp *app, uint32_t *select
 static bool zerofido_status_input_callback(InputEvent *event, void *context) {
     ZerofidoApp *app = context;
     uint32_t selected_index = 0;
+    bool list_mode = zerofido_ui_status_list_mode(app);
 
+    vault_anim_poke();
     if (event->type == InputTypeShort || event->type == InputTypeRepeat) {
         if (event->key == InputKeyUp || event->key == InputKeyDown) {
+            if (!list_mode) {
+                /* Down opens the vault; up does nothing on the door. */
+                if (event->key == InputKeyDown && event->type == InputTypeShort) {
+                    zerofido_ui_status_set_list_mode(app, true);
+                }
+                return true;
+            }
             if (zerofido_home_select_relative(app, event->key == InputKeyUp ? -1 : 1)) {
                 zerofido_ui_refresh_credentials_status(app);
+                zerofido_notify_tick(app);
             }
             return true;
         }
@@ -1340,7 +1312,16 @@ static bool zerofido_status_input_callback(InputEvent *event, void *context) {
         return false;
     }
 
+    if (event->key == InputKeyBack && list_mode) {
+        zerofido_ui_status_set_list_mode(app, false);
+        return true;
+    }
+
     if (event->key == InputKeyLeft) {
+        if (list_mode) {
+            zerofido_ui_status_set_list_mode(app, false);
+            return true;
+        }
         return zerofido_navigation_callback(app);
     }
 
@@ -1356,7 +1337,9 @@ static bool zerofido_status_input_callback(InputEvent *event, void *context) {
     }
 
     if (event->key == InputKeyOk) {
-        if (zerofido_home_selected_credential(app, &selected_index)) {
+        if (!list_mode) {
+            zerofido_ui_status_set_list_mode(app, true);
+        } else if (zerofido_home_selected_credential(app, &selected_index)) {
             zerofido_open_credential_detail(app, selected_index);
         }
         return true;
@@ -1385,8 +1368,14 @@ static uint32_t zerofido_settings_previous_callback(void *context) {
 }
 
 static uint32_t zerofido_credential_detail_previous_callback(void *context) {
-    UNUSED(context);
-    return ZfViewStatus;
+    ZerofidoApp *app = context;
+    bool about = false;
+    if (app && app->credential_detail_view) {
+        with_view_model(
+            app->credential_detail_view, ZfCredentialDetailModel * model, { about = model->about; },
+            false);
+    }
+    return about ? ZfViewSettings : ZfViewStatus;
 }
 
 static uint32_t zerofido_pin_menu_previous_callback(void *context) {
@@ -1445,9 +1434,9 @@ static bool zerofido_dev_screenshot_write_ppm(File *file, const uint8_t *frame, 
     static const uint8_t backlight[ZF_DEV_SCREENSHOT_RGB_SIZE] = {0xF4, 0xA4, 0x24};
     char header[24];
     uint8_t row[ZF_DEV_SCREENSHOT_WIDTH * ZF_DEV_SCREENSHOT_RGB_SIZE];
-    int header_len = snprintf(header, sizeof(header), "P6\n%u %u\n255\n",
-                              (unsigned)ZF_DEV_SCREENSHOT_WIDTH,
-                              (unsigned)ZF_DEV_SCREENSHOT_HEIGHT);
+    int header_len =
+        snprintf(header, sizeof(header), "P6\n%u %u\n255\n", (unsigned)ZF_DEV_SCREENSHOT_WIDTH,
+                 (unsigned)ZF_DEV_SCREENSHOT_HEIGHT);
 
     if (header_len <= 0 || (size_t)header_len >= sizeof(header) ||
         storage_file_write(file, header, (size_t)header_len) != (size_t)header_len) {
@@ -1620,16 +1609,17 @@ static void zerofido_tick_callback(void *context) {
     if (zerofido_ui_expire_pending_interaction(app)) {
         zerofido_ui_dispatch_custom_event(app, ZfEventApprovalTimeout);
     }
+    zerofido_ui_approval_service(app);
     zerofido_ui_prune_rare_views(app);
     furi_mutex_acquire(app->ui_mutex, FuriWaitForever);
     active_view = app->active_view;
     furi_mutex_release(app->ui_mutex);
-    if (active_view == ZfViewStatus) {
+    /* Once a second keeps clocks honest while the frame clock sleeps. */
+    static uint8_t slow_tick;
+    if (active_view == ZfViewStatus && ++slow_tick % 10U == 0U) {
         zerofido_ui_status_redraw(app);
-    } else if (active_view == ZfViewCredentialDetail && app->credential_detail_view) {
-        with_view_model(app->credential_detail_view, ZfCredentialDetailModel * model,
-                        { UNUSED(model); }, true);
     }
+    vault_anim_service();
 #if ZF_RELEASE_DIAGNOSTICS
     zerofido_ui_log_idle_telemetry(app);
 #endif
@@ -1677,10 +1667,7 @@ static void zerofido_ui_free_rare_view(ZerofidoApp *app, ZfViewId view_id) {
     zerofido_ui_unregister_view(app, view_id);
     switch (view_id) {
     case ZfViewApproval:
-        if (app->approval_view) {
-            dialog_ex_free(app->approval_view);
-            app->approval_view = NULL;
-        }
+        zerofido_ui_approval_view_free();
         break;
     case ZfViewCredentialDetail:
         if (app->credential_detail_view) {
@@ -1729,9 +1716,9 @@ static void zerofido_ui_prune_rare_views(ZerofidoApp *app) {
     if (!zerofido_ui_can_prune_rare_views(app)) {
         return;
     }
-    if (!app->approval_view && !app->credential_detail_view && !app->credentials_menu &&
-        !app->pin_confirm_view && !app->pin_input_view && !app->pin_menu && !app->settings_menu &&
-        !app->pin_buffers) {
+    if (!zerofido_ui_approval_view_allocated() && !app->credential_detail_view &&
+        !app->credentials_menu && !app->pin_confirm_view && !app->pin_input_view &&
+        !app->pin_menu && !app->settings_menu && !app->pin_buffers) {
         return;
     }
 
@@ -1774,15 +1761,10 @@ bool zerofido_ui_ensure_view(ZerofidoApp *app, ZfViewId view_id) {
         }
         return zerofido_ui_register_view(app, ZfViewStatus, app->status_view);
 
-    case ZfViewApproval:
-        if (!app->approval_view) {
-            app->approval_view = dialog_ex_alloc();
-            if (!app->approval_view) {
-                return false;
-            }
-        }
-        return zerofido_ui_register_view(app, ZfViewApproval,
-                                         dialog_ex_get_view(app->approval_view));
+    case ZfViewApproval: {
+        View *approval = zerofido_ui_approval_view_alloc(app);
+        return approval && zerofido_ui_register_view(app, ZfViewApproval, approval);
+    }
 
     case ZfViewCredentials:
         if (!app->credentials_menu) {
@@ -1810,6 +1792,10 @@ bool zerofido_ui_ensure_view(ZerofidoApp *app, ZfViewId view_id) {
                                zerofido_credential_detail_draw_callback);
         view_set_input_callback(app->credential_detail_view,
                                 zerofido_credential_detail_input_callback);
+        view_set_enter_callback(app->credential_detail_view,
+                                zerofido_credential_detail_enter_callback);
+        view_set_exit_callback(app->credential_detail_view,
+                               zerofido_credential_detail_exit_callback);
         view_set_previous_callback(app->credential_detail_view,
                                    zerofido_credential_detail_previous_callback);
         return zerofido_ui_register_view(app, ZfViewCredentialDetail, app->credential_detail_view);
@@ -1876,7 +1862,7 @@ bool zerofido_ui_init(ZerofidoApp *app) {
     app->active_view = ZfViewStatus;
     app->view_dispatcher = view_dispatcher_alloc();
 
-    if (!app->view_dispatcher) {
+    if (!app->view_dispatcher || !vault_anim_init()) {
         zerofido_ui_deinit(app);
         return false;
     }
@@ -1893,9 +1879,8 @@ bool zerofido_ui_init(ZerofidoApp *app) {
     app->dev_screenshot_framebuffer_registered = true;
     app->dev_screenshot_input_events = furi_record_open(RECORD_INPUT_EVENTS);
     if (app->dev_screenshot_input_events) {
-        app->dev_screenshot_input_subscription =
-            furi_pubsub_subscribe(app->dev_screenshot_input_events,
-                                  zerofido_dev_screenshot_input_callback, app);
+        app->dev_screenshot_input_subscription = furi_pubsub_subscribe(
+            app->dev_screenshot_input_events, zerofido_dev_screenshot_input_callback, app);
     }
 #endif
 
@@ -1936,10 +1921,7 @@ void zerofido_ui_deinit(ZerofidoApp *app) {
         app->ui_registered_views = 0;
     }
 
-    if (app->approval_view) {
-        dialog_ex_free(app->approval_view);
-        app->approval_view = NULL;
-    }
+    zerofido_ui_approval_view_free();
     if (app->pin_confirm_view) {
         dialog_ex_free(app->pin_confirm_view);
         app->pin_confirm_view = NULL;
@@ -1972,6 +1954,7 @@ void zerofido_ui_deinit(ZerofidoApp *app) {
         view_dispatcher_free(app->view_dispatcher);
         app->view_dispatcher = NULL;
     }
+    vault_anim_deinit();
 }
 
 void zerofido_ui_dispatch_custom_event(ZerofidoApp *app, ZfCustomEvent event) {

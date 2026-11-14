@@ -17,6 +17,7 @@
 
 #include "../zerofido_ui.h"
 
+#include <stdio.h>
 #include <string.h>
 
 #include "../transport/adapter.h"
@@ -24,6 +25,8 @@
 #include "../zerofido_notify.h"
 #include "../zerofido_runtime_config.h"
 #include "../zerofido_ui_i.h"
+#include "scene.h"
+#include "vault_anim.h"
 
 /*
  * Approval terminal transitions are one-shot: only Pending can complete, and a
@@ -40,20 +43,152 @@ static bool zerofido_ui_finish_interaction_locked(ZerofidoApp *app, ZfApprovalSt
     return true;
 }
 
-static void zerofido_dialog_result_callback(DialogExResult result, void *context) {
-    ZerofidoApp *app = context;
+/*
+ * Vault approval view. Input rules (security relevant):
+ *  - nothing is accepted for VAULT_APPROVAL_ARM_MS after the prompt appears;
+ *  - a key counts only if its press started while this prompt was armed, so a
+ *    key held over from another screen can never approve;
+ *  - OK approves, Left or Back denies; the result is published to the
+ *    protocol layer first and the vault animation plays afterwards.
+ */
+typedef struct {
+    VaultApprovalModel scene;
+    uint8_t armed_keys;
+    bool settle_pending;
+    uint32_t generation;
+} ZfApprovalViewModel;
+
+static View *zf_approval_view;
+
+static void zerofido_approval_finish(ZerofidoApp *app, ZfApprovalState state) {
     bool finished = false;
-    furi_assert(app);
 
     furi_mutex_acquire(app->ui_mutex, FuriWaitForever);
-    finished = zerofido_ui_finish_interaction_locked(
-        app, result == DialogExResultRight ? ZfApprovalApproved : ZfApprovalDenied);
+    finished = zerofido_ui_finish_interaction_locked(app, state);
     furi_mutex_release(app->ui_mutex);
     if (finished) {
         zf_transport_notify_interaction_changed(app);
     }
-
     zerofido_ui_dispatch_custom_event(app, ZfEventHideApproval);
+}
+
+static bool zerofido_approval_input_callback(InputEvent *event, void *context) {
+    ZerofidoApp *app = context;
+    ZfApprovalState result = ZfApprovalPending;
+    uint8_t bit = (uint8_t)(1U << event->key);
+
+    vault_anim_poke();
+    with_view_model(
+        zf_approval_view, ZfApprovalViewModel * model,
+        {
+            uint32_t now = furi_get_tick();
+            bool asking = model->scene.phase == VaultApprovalAsking;
+            bool armed = asking && (now - model->scene.shown_at) >= VAULT_APPROVAL_ARM_MS;
+            if (event->type == InputTypePress) {
+                if (armed)
+                    model->armed_keys |= bit;
+            } else if (event->type == InputTypeShort) {
+                if (armed && (model->armed_keys & bit)) {
+                    if (event->key == InputKeyOk) {
+                        result = ZfApprovalApproved;
+                    } else if (event->key == InputKeyLeft || event->key == InputKeyBack) {
+                        result = ZfApprovalDenied;
+                    }
+                }
+                model->armed_keys &= (uint8_t)~bit;
+            } else if (event->type == InputTypeLong) {
+                model->armed_keys &= (uint8_t)~bit;
+            }
+        },
+        false);
+    if (result != ZfApprovalPending) {
+        zerofido_approval_finish(app, result);
+    }
+    /* Every key is consumed here: nothing leaks to other screens. */
+    return true;
+}
+
+static void zerofido_approval_draw_callback(Canvas *canvas, void *model) {
+    ZfApprovalViewModel *m = model;
+    m->scene.now = furi_get_tick();
+    scene_approval_draw(canvas, &m->scene);
+}
+
+static void zerofido_approval_enter_callback(void *context) {
+    UNUSED(context);
+    vault_anim_bind(zf_approval_view, true);
+}
+
+static void zerofido_approval_exit_callback(void *context) {
+    UNUSED(context);
+    vault_anim_unbind(zf_approval_view);
+}
+
+View *zerofido_ui_approval_view_alloc(ZerofidoApp *app) {
+    if (zf_approval_view)
+        return zf_approval_view;
+    zf_approval_view = view_alloc();
+    if (!zf_approval_view)
+        return NULL;
+    view_allocate_model(zf_approval_view, ViewModelTypeLocking, sizeof(ZfApprovalViewModel));
+    view_set_context(zf_approval_view, app);
+    view_set_draw_callback(zf_approval_view, zerofido_approval_draw_callback);
+    view_set_input_callback(zf_approval_view, zerofido_approval_input_callback);
+    view_set_enter_callback(zf_approval_view, zerofido_approval_enter_callback);
+    view_set_exit_callback(zf_approval_view, zerofido_approval_exit_callback);
+    return zf_approval_view;
+}
+
+void zerofido_ui_approval_view_free(void) {
+    if (!zf_approval_view)
+        return;
+    vault_anim_unbind(zf_approval_view);
+    view_free(zf_approval_view);
+    zf_approval_view = NULL;
+}
+
+bool zerofido_ui_approval_view_allocated(void) {
+    return zf_approval_view != NULL;
+}
+
+static void zerofido_ui_settle_interaction(ZerofidoApp *app, ZfApprovalState approval_state) {
+    zerofido_ui_switch_to_view(app, ZfViewStatus);
+    if (approval_state == ZfApprovalTimedOut) {
+        zerofido_ui_set_status(app, "Request timed out");
+    } else if (approval_state == ZfApprovalDenied) {
+        zerofido_ui_set_status(app, "Request denied");
+    } else {
+        zerofido_ui_refresh_status(app);
+    }
+}
+
+/* UI thread, every dispatcher tick: returns home once the outcome has played. */
+void zerofido_ui_approval_service(ZerofidoApp *app) {
+    bool settle = false;
+    VaultApprovalPhase phase = VaultApprovalAsking;
+
+    if (!zf_approval_view)
+        return;
+    with_view_model(
+        zf_approval_view, ZfApprovalViewModel * model,
+        {
+            phase = model->scene.phase;
+            if (model->settle_pending && phase != VaultApprovalAsking &&
+                (furi_get_tick() - model->scene.outcome_at) >= scene_approval_outcome_ms(phase)) {
+                model->settle_pending = false;
+                settle = true;
+            }
+        },
+        false);
+    if (!settle)
+        return;
+    furi_mutex_acquire(app->ui_mutex, FuriWaitForever);
+    bool pending = app->approval.state == ZfApprovalPending;
+    ZfApprovalState state = app->approval.state;
+    furi_mutex_release(app->ui_mutex);
+    if (!pending) {
+        zerofido_ui_settle_interaction(app, state);
+    }
 }
 
 static void zerofido_ui_prepare_interaction_locked(ZerofidoApp *app, ZfInteractionKind kind,
@@ -194,15 +329,24 @@ bool zerofido_ui_request_assertion_selection(ZerofidoApp *app, const char *rp_id
 }
 
 void zerofido_ui_show_interaction(ZerofidoApp *app) {
-    char body[160];
+    VaultApprovalModel scene;
     ZfInteractionKind kind = ZfInteractionKindApproval;
+    uint32_t generation = 0;
 
+    memset(&scene, 0, sizeof(scene));
     furi_mutex_acquire(app->ui_mutex, FuriWaitForever);
     kind = app->approval.kind;
+    generation = app->approval.generation;
     if (kind == ZfInteractionKindApproval) {
-        zf_ui_format_approval_body(body, sizeof(body), app->approval.details.approval.protocol,
-                                   app->approval.target_id,
-                                   app->approval.details.approval.user_text);
+        const char *user = app->approval.details.approval.user_text;
+        if (strncmp(user, "User: ", 6) == 0)
+            user += 6;
+        scene.u2f = app->approval.details.approval.protocol == ZfUiProtocolU2f;
+        scene.deadline = app->approval.deadline;
+        scene_copy(scene.header, sizeof(scene.header), app->approval.details.approval.operation);
+        scene_copy(scene.site, sizeof(scene.site),
+                   app->approval.target_id[0] ? app->approval.target_id : "(unknown)");
+        scene_copy(scene.account, sizeof(scene.account), user[0] ? user : "(not provided)");
     }
     furi_mutex_release(app->ui_mutex);
 
@@ -210,15 +354,19 @@ void zerofido_ui_show_interaction(ZerofidoApp *app) {
         if (!zerofido_ui_ensure_view(app, ZfViewApproval)) {
             return;
         }
-        dialog_ex_reset(app->approval_view);
-        dialog_ex_set_context(app->approval_view, app);
-        dialog_ex_set_result_callback(app->approval_view, zerofido_dialog_result_callback);
-        dialog_ex_set_header(app->approval_view, app->approval.details.approval.operation, 64, 0,
-                             AlignCenter, AlignTop);
-        dialog_ex_set_text(app->approval_view, body, 64, 28, AlignCenter, AlignCenter);
-        dialog_ex_set_left_button_text(app->approval_view, "Deny");
-        dialog_ex_set_center_button_text(app->approval_view, NULL);
-        dialog_ex_set_right_button_text(app->approval_view, "Approve");
+        scene.phase = VaultApprovalAsking;
+        scene.shown_at = furi_get_tick();
+        with_view_model(
+            zf_approval_view, ZfApprovalViewModel * model,
+            {
+                model->scene = scene;
+                model->armed_keys = 0;
+                model->settle_pending = false;
+                model->generation = generation;
+            },
+            true);
+        vault_anim_poke();
+        vault_anim_run(VAULT_APPROVAL_ARM_MS + 100U);
     }
 
     zerofido_notify_prompt(app);
@@ -244,20 +392,39 @@ void zerofido_ui_hide_interaction(ZerofidoApp *app) {
         return;
     }
 
-    if (kind == ZfInteractionKindApproval && app->approval_view) {
-        dialog_ex_reset(app->approval_view);
-    }
-    zerofido_ui_switch_to_view(app, ZfViewStatus);
-    if (approval_state == ZfApprovalTimedOut) {
-        zerofido_ui_set_status(app, "Request timed out");
-        zerofido_notify_error(app);
-    } else if (approval_state == ZfApprovalDenied) {
-        zerofido_ui_set_status(app, "Request denied");
+    if (approval_state == ZfApprovalTimedOut || approval_state == ZfApprovalDenied) {
         zerofido_notify_error(app);
     } else {
-        zerofido_ui_refresh_status(app);
         zerofido_notify_reset(app);
     }
+
+    if (kind == ZfInteractionKindApproval && zf_approval_view) {
+        /* The result is already with the protocol layer: now play the vault. */
+        VaultApprovalPhase phase = approval_state == ZfApprovalApproved   ? VaultApprovalApproved
+                                   : approval_state == ZfApprovalTimedOut ? VaultApprovalTimedOut
+                                   : approval_state == ZfApprovalCanceled ? VaultApprovalCanceled
+                                                                          : VaultApprovalDenied;
+        bool animate = false;
+        with_view_model(
+            zf_approval_view, ZfApprovalViewModel * model,
+            {
+                if (model->generation == generation && model->scene.phase == VaultApprovalAsking) {
+                    model->scene.phase = phase;
+                    model->scene.outcome_at = furi_get_tick();
+                    model->armed_keys = 0;
+                    model->settle_pending = true;
+                    animate = true;
+                }
+            },
+            true);
+        if (animate && app->active_view == ZfViewApproval) {
+            if (phase == VaultApprovalApproved)
+                zerofido_notify_unlock(app);
+            vault_anim_run(scene_approval_outcome_ms(phase) + 100U);
+            return;
+        }
+    }
+    zerofido_ui_settle_interaction(app, approval_state);
 }
 
 bool zerofido_ui_deny_pending_interaction(ZerofidoApp *app) {

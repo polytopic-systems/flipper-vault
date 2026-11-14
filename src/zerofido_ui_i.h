@@ -30,3 +30,10 @@ void zerofido_ui_switch_to_view(ZerofidoApp *app, ZfViewId view_id);
 void zerofido_ui_show_interaction(ZerofidoApp *app);
 void zerofido_ui_hide_interaction(ZerofidoApp *app);
 bool zerofido_ui_ensure_view(ZerofidoApp *app, ZfViewId view_id);
+
+/* Vault approval view (approval_state.c). */
+typedef struct View View;
+View *zerofido_ui_approval_view_alloc(ZerofidoApp *app);
+void zerofido_ui_approval_view_free(void);
+bool zerofido_ui_approval_view_allocated(void);
+void zerofido_ui_approval_service(ZerofidoApp *app);

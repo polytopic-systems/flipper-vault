@@ -38,6 +38,41 @@ static const NotificationSequence zf_sequence_idle_charged = {
     &message_red_0, &message_green_255, &message_blue_0, &message_do_not_reset, NULL,
 };
 
+/* Two soft knocks while a prompt waits; the LED blinks yellow. */
+static const NotificationSequence zf_sequence_prompt = {
+    &message_display_backlight_on,
+    &message_vibro_on,
+    &message_note_g5,
+    &message_delay_25,
+    &message_sound_off,
+    &message_vibro_off,
+    &message_delay_50,
+    &message_vibro_on,
+    &message_note_c6,
+    &message_delay_25,
+    &message_sound_off,
+    &message_vibro_off,
+    NULL,
+};
+
+/* Bolts drawing back: a short rising chime. */
+static const NotificationSequence zf_sequence_unlock = {
+    &message_note_c6, &message_delay_50,  &message_note_e6,   &message_delay_50,
+    &message_note_g6, &message_delay_100, &message_sound_off, NULL,
+};
+
+/* The door slams: a low thud. */
+static const NotificationSequence zf_sequence_slam = {
+    &message_vibro_on,  &message_note_c4,   &message_delay_100, &message_note_g3,
+    &message_delay_100, &message_sound_off, &message_vibro_off, NULL,
+};
+
+/* A detent of the dial. */
+static const NotificationSequence zf_sequence_tick = {
+    &message_vibro_on, &message_delay_1,   &message_delay_1,
+    &message_delay_1,  &message_vibro_off, NULL,
+};
+
 /*
  * Resetting notifications returns LEDs to the idle charging/done/dark state
  * instead of just stopping blink sequences.
@@ -152,9 +187,8 @@ void zerofido_notify_prompt(ZerofidoApp *app) {
     }
 
     zf_notify_prepare_transient(app);
-    notification_message(app->notifications, &sequence_display_backlight_on);
-    notification_message(app->notifications, &sequence_single_vibro);
-    notification_message(app->notifications, &sequence_blink_start_magenta);
+    notification_message(app->notifications, &zf_sequence_prompt);
+    notification_message(app->notifications, &sequence_blink_start_yellow);
 }
 
 void zerofido_notify_wink(ZerofidoApp *app) {
@@ -163,7 +197,7 @@ void zerofido_notify_wink(ZerofidoApp *app) {
     }
 
     zf_notify_prepare_transient(app);
-    notification_message(app->notifications, &sequence_blink_start_magenta);
+    notification_message(app->notifications, &sequence_blink_start_blue);
     zf_notify_arm_clear(app, ZF_NOTIFY_WINK_MS);
 }
 
@@ -187,7 +221,7 @@ void zerofido_notify_error(ZerofidoApp *app) {
 
     zf_notify_prepare_transient(app);
     if (zf_notify_should_vibrate(app)) {
-        notification_message(app->notifications, &sequence_double_vibro);
+        notification_message(app->notifications, &zf_sequence_slam);
     }
     notification_message(app->notifications, &sequence_set_red_255);
     zf_notify_arm_clear(app, ZF_NOTIFY_ERROR_MS);
@@ -196,4 +230,18 @@ void zerofido_notify_error(ZerofidoApp *app) {
 void zerofido_notify_reset(ZerofidoApp *app) {
     zf_notify_stop_timer(app);
     zf_notify_clear(app);
+}
+
+void zerofido_notify_tick(ZerofidoApp *app) {
+    if (!app || !app->notifications) {
+        return;
+    }
+    notification_message(app->notifications, &zf_sequence_tick);
+}
+
+void zerofido_notify_unlock(ZerofidoApp *app) {
+    if (!app || !app->notifications || !zf_notify_should_vibrate(app)) {
+        return;
+    }
+    notification_message(app->notifications, &zf_sequence_unlock);
 }

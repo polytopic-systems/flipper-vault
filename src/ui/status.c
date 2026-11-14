@@ -17,42 +17,22 @@
 
 #include "../zerofido_ui.h"
 
-#include <furi/core/string.h>
 #include <stdio.h>
 #include <string.h>
-
-#include <gui/elements.h>
 
 #include "../zerofido_app_i.h"
 #include "../zerofido_store.h"
 #include "../zerofido_ui_i.h"
+#if ZF_BLE_ENABLED
+#include "../transport/ble_worker.h"
+#endif
+#include "scene.h"
 #include "status.h"
+#include "vault_anim.h"
 
-#define ZF_HOME_VISIBLE_ITEMS 2U
-#define ZF_HOME_TEXT_SCROLL_TICK_DIVISOR 500U
+/* Home: the vault door with transport and count; OK opens the passkey list. */
 
-typedef struct {
-    bool resident_key;
-    char title[72];
-    char subtitle[96];
-} ZfHomeCredentialItem;
-
-typedef enum {
-    ZfHomeStatusReady = 0,
-    ZfHomeStatusConnected,
-    ZfHomeStatusWaiting,
-    ZfHomeStatusError,
-} ZfHomeStatus;
-
-typedef struct {
-    ZfHomeStatus status;
-    ZfTransportMode transport_mode;
-    size_t item_count;
-    size_t selected_item;
-    size_t visible_start;
-    size_t visible_count;
-    ZfHomeCredentialItem items[ZF_HOME_VISIBLE_ITEMS];
-} ZfStatusModel;
+#define ZF_HOME_MESSAGE_MS 4000U
 
 typedef struct {
     ZfCredentialRecord record;
@@ -62,58 +42,65 @@ typedef struct {
 _Static_assert(sizeof(ZfStatusCredentialScratch) <= ZF_UI_SCRATCH_SIZE,
                "status credential scratch exceeds UI arena");
 
+typedef struct {
+    VaultHomeModel scene;
+    uint32_t message_at;
+} ZfStatusModel;
+
 static bool zf_status_text_is_error(const char *text) {
     return text && (strstr(text, "failed") || strstr(text, "Failed") || strstr(text, "error") ||
                     strstr(text, "denied") || strstr(text, "timed out") ||
                     strstr(text, "Could not") || strstr(text, "not found"));
 }
 
-static const char *zf_home_status_label(ZfHomeStatus status) {
-    switch (status) {
-    case ZfHomeStatusConnected:
-        return "Connected";
-    case ZfHomeStatusWaiting:
-        return "Waiting";
-    case ZfHomeStatusError:
-        return "Error";
-    case ZfHomeStatusReady:
+static VaultTransportArt zf_status_transport_art(ZfTransportMode mode) {
+    switch (mode) {
+    case ZfTransportModeNfc:
+        return VaultTransportNfc;
+    case ZfTransportModeBle:
+        return VaultTransportBle;
+    case ZfTransportModeUsbHid:
     default:
-        return "Ready";
+        return VaultTransportUsb;
     }
 }
 
-static const char *zf_home_transport_title_label(ZfTransportMode mode) {
-    return mode == ZfTransportModeNfc ? "NFC" : "USB";
+void zf_status_sigil_seed(const ZfCredentialIndexEntry *entry, VaultSigilSeed *seed) {
+#ifdef ZF_HOST_TEST
+    vault_sigil_seed(seed, entry->credential_id, entry->credential_id_len,
+                     (const uint8_t *)entry->rp_id, strlen(entry->rp_id));
+#else
+    vault_sigil_seed(seed, entry->credential_id, entry->credential_id_len, entry->rp_id_hash,
+                     sizeof(entry->rp_id_hash));
+#endif
 }
 
-static bool zf_status_format_record_item(ZfCredentialRecord *record, char *title, size_t title_size,
-                                         char *subtitle, size_t subtitle_size) {
-    const char *user = NULL;
-    const char *website = NULL;
+static void zf_status_format_record_item(const ZfCredentialRecord *record, VaultListItem *item) {
+    const char *user = record->user_display_name[0] ? record->user_display_name
+                       : record->user_name[0]       ? record->user_name
+                                                    : "No account name";
+    scene_copy(item->title, sizeof(item->title),
+               record->rp_id[0] ? record->rp_id : "Unknown website");
+    scene_copy(item->subtitle, sizeof(item->subtitle), user);
+}
 
-    if (!record || !title || !subtitle) {
-        return false;
-    }
-
-    website = record->rp_id[0] ? record->rp_id : "Unknown website";
-    if (record->user_display_name[0]) {
-        user = record->user_display_name;
-    } else if (record->user_name[0]) {
-        user = record->user_name;
-    } else {
-        user = "No account name";
-    }
-
-    snprintf(title, title_size, "%.70s", website);
-    snprintf(subtitle, subtitle_size, "%.94s", user);
-    return true;
+/* List scroll: keep the selection on the middle row when possible. */
+static int16_t zf_status_list_scroll(uint16_t selected, uint16_t count) {
+    int32_t max_scroll = ((int32_t)count - 3) * VAULT_ROW_H;
+    return (int16_t)vg_clamp(((int32_t)selected - 1) * VAULT_ROW_H, 0,
+                             max_scroll > 0 ? max_scroll : 0);
 }
 
 static bool zf_status_refresh_model(ZerofidoApp *app, bool redraw, bool reload_credentials) {
-    ZfStatusModel snapshot = {0};
-    ZfCredentialIndexEntry entries[ZF_HOME_VISIBLE_ITEMS];
-    ZfStatusCredentialScratch *scratch = NULL;
-    uint32_t selected_record_index = 0;
+    ZfCredentialIndexEntry entries[VAULT_LIST_WINDOW];
+    VaultHomeStatus status;
+    ZfTransportMode mode;
+    char message[sizeof(((VaultHomeModel *)0)->message)];
+    bool starting;
+    uint16_t count = 0;
+    uint16_t selected = 0;
+    uint16_t window_start = 0;
+    uint8_t window_count = 0;
 
     if (!app || !app->status_view) {
         return false;
@@ -121,182 +108,180 @@ static bool zf_status_refresh_model(ZerofidoApp *app, bool redraw, bool reload_c
 
     memset(entries, 0, sizeof(entries));
     furi_mutex_acquire(app->ui_mutex, FuriWaitForever);
-    snapshot.transport_mode = app->runtime_config.transport_mode;
+    mode = app->runtime_config.transport_mode;
+    starting = !app->startup_complete;
     if (zf_status_text_is_error(app->status_text)) {
-        snapshot.status = ZfHomeStatusError;
+        status = VaultHomeError;
     } else if (app->approval.state == ZfApprovalPending || app->status_text[0] != '\0' ||
                !app->startup_complete || !app->worker_thread) {
-        snapshot.status = ZfHomeStatusWaiting;
+        status = VaultHomeWaiting;
     } else if (app->transport_connected) {
-        snapshot.status = ZfHomeStatusConnected;
+        status = VaultHomeConnected;
     } else {
-        snapshot.status = ZfHomeStatusReady;
+        status = VaultHomeReady;
     }
-    if (!reload_credentials) {
-        furi_mutex_release(app->ui_mutex);
-        with_view_model(
-            app->status_view, ZfStatusModel * model,
-            {
-                model->status = snapshot.status;
-                model->transport_mode = snapshot.transport_mode;
-            },
-            redraw);
-        return true;
-    }
-    selected_record_index = app->credentials_selected_index;
-    if (app->startup_complete && app->store.records) {
+    scene_copy(message, sizeof(message), starting ? "" : app->status_text);
+
+    if (reload_credentials && app->startup_complete && app->store.records) {
         uint32_t first_record_index = UINT32_MAX;
         bool selected_found = false;
 
         for (size_t i = 0; i < app->store.count; ++i) {
-            if (!app->store.records[i].in_use) {
+            if (!app->store.records[i].in_use)
                 continue;
-            }
-
-            if (first_record_index == UINT32_MAX) {
+            if (first_record_index == UINT32_MAX)
                 first_record_index = (uint32_t)i;
-            }
-            if ((uint32_t)i == selected_record_index) {
-                snapshot.selected_item = snapshot.item_count;
+            if ((uint32_t)i == app->credentials_selected_index) {
+                selected = count;
                 selected_found = true;
             }
-            ++snapshot.item_count;
+            ++count;
         }
-
-        if (snapshot.item_count > 0 && !selected_found) {
-            selected_record_index = first_record_index;
-            app->credentials_selected_index = selected_record_index;
-            snapshot.selected_item = 0;
+        if (count > 0 && !selected_found) {
+            app->credentials_selected_index = first_record_index;
+            selected = 0;
         }
-
-        if (snapshot.selected_item >= ZF_HOME_VISIBLE_ITEMS) {
-            snapshot.visible_start = snapshot.selected_item - ZF_HOME_VISIBLE_ITEMS + 1;
+        if (count > VAULT_LIST_WINDOW && selected > 2U) {
+            window_start = selected - 2U;
+            if (window_start + VAULT_LIST_WINDOW > count)
+                window_start = count - VAULT_LIST_WINDOW;
         }
-        if (snapshot.visible_start + ZF_HOME_VISIBLE_ITEMS > snapshot.item_count &&
-            snapshot.item_count > ZF_HOME_VISIBLE_ITEMS) {
-            snapshot.visible_start = snapshot.item_count - ZF_HOME_VISIBLE_ITEMS;
-        }
-
-        size_t visible_end = snapshot.visible_start + ZF_HOME_VISIBLE_ITEMS;
         size_t position = 0;
-        for (size_t i = 0; i < app->store.count && position < visible_end; ++i) {
-            if (!app->store.records[i].in_use) {
+        for (size_t i = 0; i < app->store.count && window_count < VAULT_LIST_WINDOW; ++i) {
+            if (!app->store.records[i].in_use)
                 continue;
-            }
-            if (position >= snapshot.visible_start &&
-                snapshot.visible_count < ZF_HOME_VISIBLE_ITEMS) {
-                entries[snapshot.visible_count] = app->store.records[i];
-                snapshot.items[snapshot.visible_count].resident_key =
-                    app->store.records[i].resident_key;
-                ++snapshot.visible_count;
-            }
-            ++position;
+            if (position++ >= window_start)
+                entries[window_count++] = app->store.records[i];
         }
     }
     furi_mutex_release(app->ui_mutex);
 
-    scratch = zf_app_ui_scratch_acquire(app, sizeof(*scratch));
-    for (size_t i = 0; i < snapshot.visible_count; ++i) {
-        bool formatted = false;
+    if (!reload_credentials) {
+        with_view_model(
+            app->status_view, ZfStatusModel * model,
+            {
+                model->scene.status = status;
+                model->scene.starting = starting;
+                if (strcmp(model->scene.message, message) != 0) {
+                    scene_copy(model->scene.message, sizeof(model->scene.message), message);
+                    model->message_at = furi_get_tick();
+                }
+            },
+            redraw);
+        return true;
+    }
 
+    /* Load display labels for the visible window outside the UI lock. */
+    VaultListItem *items = malloc(sizeof(VaultListItem) * VAULT_LIST_WINDOW);
+    if (!items)
+        return false;
+    memset(items, 0, sizeof(VaultListItem) * VAULT_LIST_WINDOW);
+    ZfStatusCredentialScratch *scratch = zf_app_ui_scratch_acquire(app, sizeof(*scratch));
+    for (uint8_t i = 0; i < window_count; ++i) {
+        VaultListItem *item = &items[i];
+        item->valid = true;
+        zf_status_sigil_seed(&entries[i], &item->seed);
         if (scratch && zf_store_load_record_for_display_with_buffer(
                            app->storage, &entries[i], &scratch->record, scratch->store_io,
                            sizeof(scratch->store_io))) {
-            formatted = zf_status_format_record_item(
-                &scratch->record, snapshot.items[i].title, sizeof(snapshot.items[i].title),
-                snapshot.items[i].subtitle, sizeof(snapshot.items[i].subtitle));
+            zf_status_format_record_item(&scratch->record, item);
             memset(&scratch->record, 0, sizeof(scratch->record));
+        } else {
+            zf_ui_format_passkey_index_title(&entries[i], item->title, sizeof(item->title));
+            zf_ui_format_passkey_index_subtitle(&entries[i], item->subtitle,
+                                                sizeof(item->subtitle));
         }
-
-        if (!formatted) {
-            zf_ui_format_passkey_index_title(&entries[i], snapshot.items[i].title,
-                                             sizeof(snapshot.items[i].title));
-            zf_ui_format_passkey_index_subtitle(&entries[i], snapshot.items[i].subtitle,
-                                                sizeof(snapshot.items[i].subtitle));
-        }
-
     }
     zf_app_ui_scratch_release(app);
 
-    with_view_model(app->status_view, ZfStatusModel * model, { *model = snapshot; }, redraw);
+    with_view_model(
+        app->status_view, ZfStatusModel * model,
+        {
+            VaultHomeModel *m = &model->scene;
+            m->transport = zf_status_transport_art(mode);
+            snprintf(m->transport_label, sizeof(m->transport_label), "%s",
+                     zf_transport_mode_short_name(mode));
+            m->status = status;
+            m->starting = starting;
+            if (strcmp(m->message, message) != 0) {
+                scene_copy(m->message, sizeof(m->message), message);
+                model->message_at = furi_get_tick();
+            }
+            int16_t scroll = zf_status_list_scroll(selected, count);
+            m->count = count;
+            m->selected = selected;
+            if (scroll != m->scroll_to) {
+                m->scroll_from = m->scroll_to;
+                m->scroll_to = scroll;
+                m->scroll_at = furi_get_tick();
+            }
+            m->window_start = window_start;
+            m->window_count = window_count;
+            memcpy(m->items, items, sizeof(VaultListItem) * VAULT_LIST_WINDOW);
+            if (count == 0)
+                m->list_mode = false;
+        },
+        redraw);
+    free(items);
+    vault_anim_run(160);
     return true;
-}
-
-static void zf_status_draw_scrollable_line(Canvas *canvas, FuriString *line, int32_t x, int32_t y,
-                                           size_t width, const char *text, bool scroll) {
-    if (!line) return;
-
-    furi_string_set(line, text ? text : "");
-    elements_scrollable_text_line(canvas, x, y, width, line,
-                                  scroll ? (furi_get_tick() / ZF_HOME_TEXT_SCROLL_TICK_DIVISOR) :
-                                           0U,
-                                  !scroll);
 }
 
 static void zf_status_draw_callback(Canvas *canvas, void *model) {
     ZfStatusModel *status = model;
-    const char *transport_title = NULL;
-    FuriString *scroll_line = NULL;
+    VaultHomeModel *m = &status->scene;
 
-    furi_assert(status);
-    if (!status) {
-        return;
-    }
-    transport_title = zf_home_transport_title_label(status->transport_mode);
-
-    canvas_clear(canvas);
-    canvas_set_color(canvas, ColorBlack);
-    canvas_set_font(canvas, FontSecondary);
-    canvas_draw_str(canvas, 4, 10, "ZeroFIDO");
-    canvas_draw_str(canvas, 5, 10, "ZeroFIDO");
-    canvas_draw_str(canvas, 48, 10, transport_title);
-    canvas_draw_str(canvas, 49, 10, transport_title);
-    canvas_draw_str(canvas, 74, 10, zf_home_status_label(status->status));
-    canvas_draw_line(canvas, 0, 13, 127, 13);
-
-    if (status->item_count == 0) {
-        canvas_draw_str(canvas, 14, 30, "No passkeys saved");
-        canvas_draw_str(canvas, 14, 42, "Create one in a browser");
-    } else {
-        scroll_line = furi_string_alloc();
-        for (size_t row = 0; row < status->visible_count; ++row) {
-            size_t item_index = status->visible_start + row;
-            int32_t y = 16 + (int32_t)(row * 18U);
-
-            if (item_index == status->selected_item) {
-                elements_slightly_rounded_box(canvas, 1, y - 1, 123, 17);
-                canvas_set_color(canvas, ColorWhite);
-            } else {
-                canvas_draw_line(canvas, 2, y + 1, 2, y + 14);
-            }
-            canvas_set_font(canvas, FontPrimary);
-            zf_status_draw_scrollable_line(
-                canvas, scroll_line, 5, y + 7, status->items[row].resident_key ? 108U : 118U,
-                status->items[row].title, item_index == status->selected_item);
-            if (status->items[row].resident_key) {
-                canvas_set_font(canvas, FontSecondary);
-                canvas_draw_str(canvas, 112, y + 8, "RK");
-            }
-            canvas_set_font(canvas, FontSecondary);
-            zf_status_draw_scrollable_line(canvas, scroll_line, 5, y + 16, 118U,
-                                           status->items[row].subtitle,
-                                           item_index == status->selected_item);
-            canvas_set_color(canvas, ColorBlack);
-        }
-        furi_string_free(scroll_line);
-        if (status->item_count > ZF_HOME_VISIBLE_ITEMS) {
-            elements_scrollbar_pos(canvas, 127, 15, 37, status->selected_item, status->item_count);
+    m->now = furi_get_tick();
+    m->ambient = (int32_t)(vault_anim_ambient_until() - m->now) > 0;
+    VaultHomeStatus saved = m->status;
+#if ZF_BLE_ENABLED
+    /* Bluetooth link state drives the radio rings and the status light. */
+    if (m->transport == VaultTransportBle) {
+        ZfBleLinkState link = zf_transport_ble_link_state();
+        if (link == ZfBleLinkStateConnected || link == ZfBleLinkStateSecured) {
+            if (m->status == VaultHomeReady)
+                m->status = VaultHomeConnected;
+        } else if (link == ZfBleLinkStateOff && m->status != VaultHomeError) {
+            m->ambient = false; /* no rings while the radio is off */
         }
     }
-    elements_button_left(canvas, "Exit");
-    elements_button_right(canvas, "Settings");
+#endif
+    /* Status messages show for a few seconds, then the count returns. */
+    char message[sizeof(m->message)];
+    memcpy(message, m->message, sizeof(message));
+    if ((m->now - status->message_at) > ZF_HOME_MESSAGE_MS && m->status != VaultHomeError) {
+        m->message[0] = '\0';
+    }
+    scene_home_draw(canvas, m);
+    memcpy(m->message, message, sizeof(message));
+    m->status = saved;
+}
+
+static void zf_status_enter_callback(void *context) {
+    ZerofidoApp *app = context;
+    vault_anim_bind(app->status_view, true);
+}
+
+static void zf_status_exit_callback(void *context) {
+    ZerofidoApp *app = context;
+    vault_anim_unbind(app->status_view);
 }
 
 void zerofido_ui_status_bind_view(ZerofidoApp *app) {
     view_allocate_model(app->status_view, ViewModelTypeLocking, sizeof(ZfStatusModel));
     view_set_context(app->status_view, app);
     view_set_draw_callback(app->status_view, zf_status_draw_callback);
+    view_set_enter_callback(app->status_view, zf_status_enter_callback);
+    view_set_exit_callback(app->status_view, zf_status_exit_callback);
+    with_view_model(
+        app->status_view, ZfStatusModel * model,
+        {
+            memset(model, 0, sizeof(*model));
+            model->scene.boot_at = furi_get_tick();
+        },
+        false);
     zf_status_refresh_model(app, false, true);
+    vault_anim_run(VAULT_BOOT_MS + 100U);
 }
 
 void zerofido_ui_status_redraw(ZerofidoApp *app) {
@@ -305,6 +290,36 @@ void zerofido_ui_status_redraw(ZerofidoApp *app) {
     }
 
     with_view_model(app->status_view, ZfStatusModel * model, { UNUSED(model); }, true);
+}
+
+bool zerofido_ui_status_list_mode(ZerofidoApp *app) {
+    bool list_mode = false;
+    if (!app || !app->status_view)
+        return false;
+    with_view_model(
+        app->status_view, ZfStatusModel * model,
+        { list_mode = model->scene.list_mode && model->scene.count > 0; }, false);
+    return list_mode;
+}
+
+bool zerofido_ui_status_set_list_mode(ZerofidoApp *app, bool list_mode) {
+    bool changed = false;
+    if (!app || !app->status_view)
+        return false;
+    with_view_model(
+        app->status_view, ZfStatusModel * model,
+        {
+            if (list_mode && model->scene.count == 0)
+                list_mode = false;
+            changed = model->scene.list_mode != list_mode;
+            model->scene.list_mode = list_mode;
+            model->scene.boot_at = 0;
+        },
+        false);
+    if (changed) {
+        zerofido_ui_status_redraw(app);
+    }
+    return changed;
 }
 
 static void zerofido_ui_refresh_status_internal(ZerofidoApp *app, bool credentials_dirty) {

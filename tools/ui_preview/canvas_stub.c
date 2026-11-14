@@ -5,6 +5,7 @@
  * glyph shapes match the device. Boxes/frames follow u8g2's algorithms.
  */
 #include <gui/canvas.h>
+#include <gui/elements.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -336,4 +337,91 @@ void canvas_draw_str_aligned(Canvas *canvas, int32_t x, int32_t y, Align horizon
     if (vertical == AlignTop) y += ascent;
     else if (vertical == AlignCenter) y += ascent / 2;
     canvas_draw_str(canvas, x, y, str);
+}
+
+void canvas_draw_circle(Canvas *canvas, int32_t x, int32_t y, size_t radius) {
+    round_section(canvas, x, y, (int32_t)radius, UR | UL | LL | LR, 0);
+}
+
+void canvas_draw_disc(Canvas *canvas, int32_t x, int32_t y, size_t radius) {
+    round_section(canvas, x, y, (int32_t)radius, UR | UL | LL | LR, 1);
+}
+
+/* u8g2 DrawXBM in solid bitmap mode: background bits drawn in the inverse color. */
+void canvas_draw_xbm(Canvas *canvas, int32_t x, int32_t y, size_t width, size_t height,
+                     const uint8_t *bitmap) {
+    size_t stride = (width + 7) / 8;
+    Color fg = canvas->color;
+    for (size_t j = 0; j < height; ++j) {
+        for (size_t i = 0; i < width; ++i) {
+            int on = (bitmap[j * stride + i / 8] >> (i % 8)) & 1;
+            if (!on && fg == ColorXOR) continue;
+            canvas->color = on ? fg : (fg == ColorBlack ? ColorWhite : ColorBlack);
+            px(canvas, x + (int32_t)i, y + (int32_t)j);
+        }
+    }
+    canvas->color = fg;
+}
+
+/* Firmware button icons, drawn as in assets ButtonLeft_4x7 / ButtonCenter_7x7. */
+static void icon_left(Canvas *c, int32_t x, int32_t y) {
+    for (int i = 0; i < 4; ++i) for (int j = 3 - i; j <= 3 + i; ++j) px(c, x + i, y + j);
+}
+
+static void icon_right(Canvas *c, int32_t x, int32_t y) {
+    for (int i = 0; i < 4; ++i) for (int j = i; j <= 6 - i; ++j) px(c, x + i, y + j);
+}
+
+static void icon_center(Canvas *c, int32_t x, int32_t y) {
+    static const uint8_t rows[7] = {0x1C, 0x22, 0x5D, 0x5D, 0x5D, 0x22, 0x1C};
+    for (int j = 0; j < 7; ++j) for (int i = 0; i < 7; ++i) if ((rows[j] >> i) & 1) px(c, x + i, y + j);
+}
+
+void elements_button_left(Canvas *canvas, const char *str) {
+    const int32_t bh = 12, vo = 3, ho = 3, iw = 4 + 3, y = 64;
+    int32_t bw = canvas_string_width(canvas, str) + ho * 2 + iw;
+    canvas_draw_box(canvas, 0, y - bh, (size_t)bw, (size_t)bh);
+    for (int k = 0; k < 3; ++k) canvas_draw_line(canvas, bw + k, y, bw + k, y - bh + k);
+    canvas_invert_color(canvas);
+    icon_left(canvas, ho, y - 7 - vo);
+    canvas_draw_str(canvas, ho + iw, y - vo, str);
+    canvas_invert_color(canvas);
+}
+
+void elements_button_right(Canvas *canvas, const char *str) {
+    const int32_t bh = 12, vo = 3, ho = 3, iw = 4 + 3, y = 64;
+    int32_t bw = canvas_string_width(canvas, str) + ho * 2 + iw;
+    int32_t x = 128;
+    canvas_draw_box(canvas, x - bw, y - bh, (size_t)bw, (size_t)bh);
+    for (int k = 0; k < 3; ++k) canvas_draw_line(canvas, x - bw - 1 - k, y, x - bw - 1 - k, y - bh + k);
+    canvas_invert_color(canvas);
+    canvas_draw_str(canvas, x - bw + ho, y - vo, str);
+    icon_right(canvas, x - ho - 4, y - 7 - vo);
+    canvas_invert_color(canvas);
+}
+
+void elements_button_center(Canvas *canvas, const char *str) {
+    const int32_t bh = 12, vo = 3, ho = 1, iw = 7 + 3, y = 64;
+    int32_t bw = canvas_string_width(canvas, str) + ho * 2 + iw;
+    int32_t x = (128 - bw) / 2;
+    canvas_draw_box(canvas, x, y - bh, (size_t)bw, (size_t)bh);
+    for (int k = 0; k < 3; ++k) {
+        canvas_draw_line(canvas, x - 1 - k, y, x - 1 - k, y - bh + k);
+        canvas_draw_line(canvas, x + bw + k, y, x + bw + k, y - bh + k);
+    }
+    canvas_invert_color(canvas);
+    icon_center(canvas, x + ho, y - 7 - vo);
+    canvas_draw_str(canvas, x + ho + iw, y - vo, str);
+    canvas_invert_color(canvas);
+}
+
+void elements_scrollbar_pos(Canvas *canvas, int32_t x, int32_t y, size_t height, size_t pos,
+                            size_t total) {
+    int32_t h = (int32_t)height;
+    for (int32_t i = 0; i < h; i += 2) px(canvas, x - 2, y + i);
+    if (total == 0) return;
+    int32_t block = h / (int32_t)total;
+    if (block < 2) block = 2;
+    int32_t by = y + (int32_t)pos * (h - block) / ((int32_t)total > 1 ? (int32_t)total - 1 : 1);
+    canvas_draw_box(canvas, x - 3, by, 3, (size_t)block);
 }
