@@ -2583,6 +2583,56 @@ static void test_get_info_nfc_ctap2_0_advertises_transport_compactly(void) {
            "NFC CTAP 2.0 profile should omit CTAP 2.1 firmwareVersion");
 }
 
+static void test_get_info_ble_advertises_ble_transport(void) {
+    ZfResolvedCapabilities capabilities;
+    uint8_t response[512];
+    size_t response_len = 0;
+
+    ZfRuntimeConfig config;
+    zf_runtime_config_load_defaults(&config);
+    zf_runtime_config_resolve_capabilities(&config, &capabilities);
+    capabilities.usb_hid_enabled = false;
+    capabilities.advertise_usb_transport = false;
+    capabilities.ble_enabled = true;
+    capabilities.advertise_ble_transport = true;
+
+    expect(zf_ctap_build_get_info_response(&capabilities, false, response, sizeof(response),
+                                           &response_len) == ZF_CTAP_SUCCESS,
+           "BLE GetInfo should encode");
+    expect(cbor_map_contains_uint_key(response, response_len, 9),
+           "BLE GetInfo should advertise transports");
+    expect(contains_text(response, response_len, "ble"),
+           "BLE GetInfo transport list should include ble");
+    expect(!contains_text(response, response_len, "usb"),
+           "BLE GetInfo transport list should not include usb");
+}
+
+static void test_runtime_ble_capabilities_follow_build_flag(void) {
+    ZfRuntimeConfig config;
+    ZfResolvedCapabilities capabilities;
+
+    zf_runtime_config_load_defaults(&config);
+    config.transport_mode = ZfTransportModeBle;
+    zf_runtime_config_resolve_capabilities(&config, &capabilities);
+    expect(capabilities.ble_enabled == (ZF_BLE_ENABLED != 0),
+           "BLE capability should follow ZF_BLE_ENABLED");
+    expect(!capabilities.usb_hid_enabled && !capabilities.nfc_enabled,
+           "BLE mode should not enable USB or NFC");
+    expect(zf_runtime_config_transport_mode_supported(ZfTransportModeBle) == (ZF_BLE_ENABLED != 0),
+           "BLE mode support should follow ZF_BLE_ENABLED");
+    expect(strcmp(zf_transport_mode_name(ZfTransportModeBle), "Bluetooth") == 0,
+           "BLE transport should be named Bluetooth");
+    expect(strcmp(zf_transport_mode_short_name(ZfTransportModeBle), "BLE") == 0,
+           "BLE transport short name should be BLE");
+    expect(zf_runtime_config_next_transport_mode(ZfTransportModeUsbHid) == ZfTransportModeNfc,
+           "settings cycle should go from USB to NFC");
+    expect(zf_runtime_config_next_transport_mode(ZfTransportModeNfc) ==
+               (ZF_BLE_ENABLED ? ZfTransportModeBle : ZfTransportModeUsbHid),
+           "settings cycle should go from NFC to Bluetooth when built in, else USB");
+    expect(zf_runtime_config_next_transport_mode(ZfTransportModeBle) == ZfTransportModeUsbHid,
+           "settings cycle should go from Bluetooth back to USB");
+}
+
 static void test_get_info_experimental_2_1_advertises_pin_uv_auth_token(void) {
     ZerofidoApp app = {0};
     ZfCredentialIndexEntry app_store_records[ZF_MAX_CREDENTIALS] = {0};

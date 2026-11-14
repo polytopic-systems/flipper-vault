@@ -451,8 +451,8 @@ def main(argv: list[str] | None = None) -> int:
         )
     if not statuses:
         print("usage: check_symbol_gate.py <flipperzero-firmware-root>")
-        print("   or: check_symbol_gate.py --fap dist/zerofido.fap")
-        print(f"   or: check_symbol_gate.py --fap dist/zerofido.fap --output-fap {FAP_DEFAULT_OUTPUT}")
+        print("   or: check_symbol_gate.py --fap dist/flipper_vault.fap")
+        print(f"   or: check_symbol_gate.py --fap dist/flipper_vault.fap --output-fap {FAP_DEFAULT_OUTPUT}")
         return 2
 
     return max(statuses)

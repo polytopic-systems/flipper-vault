@@ -28,6 +28,8 @@ typedef struct ZerofidoApp ZerofidoApp;
 typedef enum {
     ZfTransportModeUsbHid = 0,
     ZfTransportModeNfc = 1,
+    /* Bluetooth LE (CTAP BLE). Valid only in builds with ZF_BLE_ENABLED. */
+    ZfTransportModeBle = 2,
 } ZfTransportMode;
 
 typedef enum {
@@ -53,6 +55,7 @@ typedef struct {
 typedef struct {
     bool usb_hid_enabled;
     bool nfc_enabled;
+    bool ble_enabled;
     bool fido2_enabled;
     bool u2f_enabled;
     bool client_pin_enabled;
@@ -70,6 +73,7 @@ typedef struct {
     bool make_cred_uv_not_required;
     bool advertise_usb_transport;
     bool advertise_nfc_transport;
+    bool advertise_ble_transport;
     bool auto_accept_requests;
     ZfAttestationMode attestation_mode;
 } ZfResolvedCapabilities;
@@ -91,11 +95,17 @@ bool zf_runtime_config_set_fido2_profile(ZerofidoApp *app, Storage *storage,
 bool zf_runtime_config_set_attestation_mode(ZerofidoApp *app, Storage *storage,
                                             ZfAttestationMode mode);
 bool zf_runtime_config_set_transport_mode(ZerofidoApp *app, Storage *storage, ZfTransportMode mode);
+/* True if this build can run the given transport mode (profile and BLE flags). */
+bool zf_runtime_config_transport_mode_supported(ZfTransportMode mode);
 void zf_runtime_config_resolve_capabilities(const ZfRuntimeConfig *config,
                                             ZfResolvedCapabilities *capabilities);
 void zf_runtime_get_effective_capabilities(const ZerofidoApp *app,
                                            ZfResolvedCapabilities *capabilities);
 bool zf_runtime_ctap_command_enabled(const ZerofidoApp *app, uint8_t cmd);
+/* Settings cycle: USB HID -> NFC -> Bluetooth -> USB HID, skipping modes this build lacks. */
+ZfTransportMode zf_runtime_config_next_transport_mode(ZfTransportMode mode);
 const char *zf_transport_mode_name(ZfTransportMode mode);
+/* Compact label for the home screen: "USB", "NFC" or "BLE". */
+const char *zf_transport_mode_short_name(ZfTransportMode mode);
 const char *zf_fido2_profile_name(ZfFido2Profile profile);
 const char *zf_attestation_mode_name(ZfAttestationMode mode);

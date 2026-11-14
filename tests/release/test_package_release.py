@@ -32,7 +32,7 @@ class PackageReleaseTests(unittest.TestCase):
         self.assertEqual(status, 0)
         run_ufbt.assert_called_once_with(packed_attestation=True)
         check_fap.assert_called_once_with(
-            ROOT / "dist/zerofido.fap",
+            ROOT / "dist/flipper_vault.fap",
             fix=False,
             output_fap=ROOT / "dist/zerofido-release.fap",
         )

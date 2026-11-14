@@ -24,6 +24,9 @@
 #else
 #include "nfc_worker.h"
 #include "usb_hid_worker.h"
+#if ZF_BLE_ENABLED
+#include "ble_worker.h"
+#endif
 #endif
 #include "../zerofido_app_i.h"
 
@@ -60,6 +63,22 @@ const ZfTransportAdapterOps zf_transport_nfc_adapter = {
     .wait_for_interaction = zf_transport_nfc_wait_for_interaction,
     .notify_interaction_changed = zf_transport_nfc_notify_interaction_changed,
     .poll_cbor_control = zf_transport_nfc_poll_cbor_control,
+};
+#endif
+
+/*
+ * BLE adapter publishes CTAP BLE frames as fidoStatus notifications and handles
+ * CANCEL/KEEPALIVE. The worker also owns the Bluetooth profile switch.
+ */
+#if ZF_BLE_ENABLED
+const ZfTransportAdapterOps zf_transport_ble_adapter = {
+    .worker = zf_transport_ble_worker,
+    .worker_stack_size = 6 * 1024,
+    .stop = zf_transport_ble_stop,
+    .send_dispatch_result = zf_transport_ble_send_dispatch_result,
+    .wait_for_interaction = zf_transport_ble_wait_for_interaction,
+    .notify_interaction_changed = zf_transport_ble_notify_interaction_changed,
+    .poll_cbor_control = zf_transport_ble_poll_cbor_control,
 };
 #endif
 

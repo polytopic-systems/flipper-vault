@@ -103,7 +103,7 @@ class SymbolGateTests(unittest.TestCase):
             optimize.assert_called_once_with("objcopy", "readelf", output)
 
     def test_packaging_removes_standard_relocations_then_remaps_fast_relocations(self) -> None:
-        fap = Path("dist/zerofido.fap")
+        fap = Path("dist/flipper_vault.fap")
         sections = symbol_gate.parse_readelf_sections(RAW_FAP_SECTIONS)
 
         with (
@@ -124,10 +124,10 @@ class SymbolGateTests(unittest.TestCase):
 
     def test_output_fap_argument_is_parsed(self) -> None:
         args = symbol_gate.parse_args(
-            ["--fap", "dist/zerofido.fap", "--output-fap", "dist/zerofido-release.fap"]
+            ["--fap", "dist/flipper_vault.fap", "--output-fap", "dist/zerofido-release.fap"]
         )
 
-        self.assertEqual(args.fap, Path("dist/zerofido.fap"))
+        self.assertEqual(args.fap, Path("dist/flipper_vault.fap"))
         self.assertEqual(args.output_fap, Path("dist/zerofido-release.fap"))
 
 

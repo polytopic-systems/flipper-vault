@@ -46,19 +46,34 @@ typedef struct {
     uint8_t attestation_mode;
 } ZfRuntimeConfigFileRecord;
 
+#if ZF_BLE_ENABLED && (defined(ZF_USB_ONLY) || defined(ZF_NFC_ONLY))
+#error "ZF_BLE_ENABLED requires the full profile"
+#endif
+#if ZF_DEV_DEFAULT_BLE && !ZF_BLE_ENABLED
+#error "ZF_DEV_DEFAULT_BLE requires ZF_BLE_ENABLED"
+#endif
+
 static bool zf_transport_mode_is_valid(uint8_t mode) {
 #ifdef ZF_USB_ONLY
     return mode == ZfTransportModeUsbHid;
 #elif defined(ZF_NFC_ONLY)
     return mode == ZfTransportModeNfc;
 #else
-    return mode == ZfTransportModeUsbHid || mode == ZfTransportModeNfc;
+    return mode == ZfTransportModeUsbHid || mode == ZfTransportModeNfc ||
+           (ZF_BLE_ENABLED && mode == ZfTransportModeBle);
 #endif
+}
+
+bool zf_runtime_config_transport_mode_supported(ZfTransportMode mode) {
+    return zf_transport_mode_is_valid((uint8_t)mode);
 }
 
 static ZfTransportMode zf_runtime_config_default_transport_mode(void) {
 #ifdef ZF_NFC_ONLY
     return ZfTransportModeNfc;
+#elif ZF_DEV_DEFAULT_BLE
+    /* Dev builds: Bluetooth keeps the USB serial CLI available for ufbt/log. */
+    return ZfTransportModeBle;
 #else
     return ZfTransportModeUsbHid;
 #endif
@@ -381,6 +396,7 @@ void zf_runtime_config_resolve_capabilities(const ZfRuntimeConfig *config,
                                             ZfResolvedCapabilities *capabilities) {
     bool usb_hid_enabled = false;
     bool nfc_enabled = false;
+    bool ble_enabled = false;
 
     if (!config || !capabilities) {
         return;
@@ -395,16 +411,18 @@ void zf_runtime_config_resolve_capabilities(const ZfRuntimeConfig *config,
 #else
     usb_hid_enabled = config->transport_mode == ZfTransportModeUsbHid;
     nfc_enabled = config->transport_mode == ZfTransportModeNfc;
+    ble_enabled = ZF_BLE_ENABLED && config->transport_mode == ZfTransportModeBle;
 #endif
 
     memset(capabilities, 0, sizeof(*capabilities));
     capabilities->usb_hid_enabled = usb_hid_enabled;
     capabilities->nfc_enabled = nfc_enabled;
+    capabilities->ble_enabled = ble_enabled;
     capabilities->fido2_enabled = true;
     capabilities->u2f_enabled = config->u2f_enabled;
     capabilities->client_pin_enabled = true;
-    capabilities->transport_keepalive_enabled = usb_hid_enabled;
-    capabilities->transport_cancel_enabled = usb_hid_enabled;
+    capabilities->transport_keepalive_enabled = usb_hid_enabled || ble_enabled;
+    capabilities->transport_cancel_enabled = usb_hid_enabled || ble_enabled;
     capabilities->transport_wink_enabled = usb_hid_enabled && config->u2f_enabled;
     capabilities->fido2_profile = zf_fido2_profile_for_build(config->fido2_profile);
     capabilities->advertise_fido_2_1 =
@@ -422,6 +440,7 @@ void zf_runtime_config_resolve_capabilities(const ZfRuntimeConfig *config,
     capabilities->make_cred_uv_not_required = capabilities->advertise_fido_2_1;
     capabilities->advertise_usb_transport = usb_hid_enabled;
     capabilities->advertise_nfc_transport = nfc_enabled;
+    capabilities->advertise_ble_transport = ble_enabled;
     capabilities->auto_accept_requests = ZF_AUTO_ACCEPT_REQUESTS && config->auto_accept_requests;
     capabilities->attestation_mode = zf_attestation_mode_for_build(config->attestation_mode);
 }
@@ -463,10 +482,42 @@ bool zf_runtime_ctap_command_enabled(const ZerofidoApp *app, uint8_t cmd) {
     }
 }
 
+ZfTransportMode zf_runtime_config_next_transport_mode(ZfTransportMode mode) {
+    static const ZfTransportMode order[] = {ZfTransportModeUsbHid, ZfTransportModeNfc,
+                                            ZfTransportModeBle};
+    const size_t count = sizeof(order) / sizeof(order[0]);
+    size_t index = 0;
+
+    while (index < count && order[index] != mode) {
+        index++;
+    }
+    for (size_t step = 1; step <= count; ++step) {
+        ZfTransportMode candidate = order[(index + step) % count];
+        if (zf_transport_mode_is_valid((uint8_t)candidate)) {
+            return candidate;
+        }
+    }
+    return mode;
+}
+
+const char *zf_transport_mode_short_name(ZfTransportMode mode) {
+    switch (mode) {
+    case ZfTransportModeNfc:
+        return "NFC";
+    case ZfTransportModeBle:
+        return "BLE";
+    case ZfTransportModeUsbHid:
+    default:
+        return "USB";
+    }
+}
+
 const char *zf_transport_mode_name(ZfTransportMode mode) {
     switch (mode) {
     case ZfTransportModeNfc:
         return "NFC";
+    case ZfTransportModeBle:
+        return "Bluetooth";
     case ZfTransportModeUsbHid:
     default:
         return "USB HID";
