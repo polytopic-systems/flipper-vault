@@ -160,6 +160,9 @@ static bool zf_status_refresh_model(ZerofidoApp *app, bool redraw, bool reload_c
         with_view_model(
             app->status_view, ZfStatusModel * model,
             {
+                model->scene.transport = zf_status_transport_art(mode);
+                snprintf(model->scene.transport_label, sizeof(model->scene.transport_label), "%s",
+                         zf_transport_mode_short_name(mode));
                 model->scene.status = status;
                 model->scene.starting = starting;
                 if (strcmp(model->scene.message, message) != 0) {
