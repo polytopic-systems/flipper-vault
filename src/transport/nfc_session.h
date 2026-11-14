@@ -49,10 +49,8 @@ bool zf_transport_nfc_send_deferred_response_or_wtx(const ZerofidoApp *app,
 bool zf_transport_nfc_queue_request_locked(ZerofidoApp *app, ZfNfcTransportState *state,
                                            ZfNfcRequestKind request_kind, const uint8_t *request,
                                            size_t request_len);
-bool zf_transport_nfc_handle_select(ZfNfcTransportState *state, const ZfNfcApdu *apdu,
-                                    const ZfResolvedCapabilities *capabilities);
+bool zf_transport_nfc_handle_select(ZfNfcTransportState *state, const ZfNfcApdu *apdu);
 void zf_transport_nfc_store_response(ZerofidoApp *app, ZfNfcTransportState *state,
                                      ZfTransportSessionId session_id, uint32_t request_generation,
                                      const uint8_t *response, size_t response_len,
-                                     bool response_is_u2f, bool response_is_error,
-                                     uint16_t error_status_word);
+                                     bool response_is_error, uint16_t error_status_word);

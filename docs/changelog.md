@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased (Vault)
+
+- Removed legacy U2F (CTAP1) to fit the app in memory. GetInfo lists `FIDO_2_0` only; USB HID
+  INIT sets `CAPABILITY_NMSG` and `CTAPHID_MSG` gets `ERR_INVALID_CMD`; NFC SELECT returns
+  `FIDO_2_0` and CTAP1 APDUs get `6D00`. Passkeys and the credential store are unchanged; old
+  files under `/ext/apps_data/flipper_vault/u2f` are ignored.
+- Release builds compile out the developer-only CTAP 2.1 paths (`ZF_DEV_FIDO2_1=0`).
+
 ## 0.7.0
 
 - Fixed intermittent U2F HID response drops under fast conformance-tool turn-around by adding a small pre-response settle window for CTAPHID MSG replies.

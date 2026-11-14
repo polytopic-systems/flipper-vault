@@ -38,26 +38,26 @@ typedef enum {
     ZfFido2ProfileCurrent = ZfFido2ProfileCtap2_0,
 } ZfFido2Profile;
 
-typedef enum {
-    ZfU2fProfileCurrent = 0,
-} ZfU2fProfile;
-
 typedef struct {
     ZfTransportMode transport_mode;
     bool fido2_enabled;
     ZfFido2Profile fido2_profile;
-    bool u2f_enabled;
-    ZfU2fProfile u2f_profile;
     bool auto_accept_requests;
     ZfAttestationMode attestation_mode;
 } ZfRuntimeConfig;
+
+/*
+ * CTAP 2.1 features (FIDO_2_1, PIN protocol 2, pinUvAuthToken, makeCredUvNotRqd)
+ * are only reachable in ZF_DEV_FIDO2_1 builds. Reading those capabilities
+ * through this macro lets release builds drop the unreachable code.
+ */
+#define ZF_CAP_FIDO21(value) (ZF_DEV_FIDO2_1 && (value))
 
 typedef struct {
     bool usb_hid_enabled;
     bool nfc_enabled;
     bool ble_enabled;
     bool fido2_enabled;
-    bool u2f_enabled;
     bool client_pin_enabled;
     bool selection_enabled;
     bool transport_keepalive_enabled;
@@ -66,7 +66,6 @@ typedef struct {
     ZfFido2Profile fido2_profile;
     bool advertise_fido_2_1;
     bool advertise_fido_2_0;
-    bool advertise_u2f_v2;
     bool pin_uv_auth_token_enabled;
     bool pin_uv_auth_protocol_2_enabled;
     bool client_pin_token_requires_consent;

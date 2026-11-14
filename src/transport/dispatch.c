@@ -27,7 +27,6 @@
 #include "../zerofido_runtime_config.h"
 #include "../zerofido_telemetry.h"
 #include "../zerofido_ui.h"
-#include "../u2f/adapter.h"
 
 static bool zf_transport_dispatch_was_interrupted(const ZfTransportState *transport,
                                                   uint32_t generation) {
@@ -67,14 +66,6 @@ static void zf_transport_dispatch_ping(const ZfProtocolDispatchRequest *request,
     }
 }
 
-static void zf_transport_dispatch_u2f(ZerofidoApp *app, const ZfProtocolDispatchRequest *request,
-                                      ZfProtocolDispatchResult *result) {
-    zf_transport_dispatch_begin(result, result->response, result->response_capacity);
-    result->response_len =
-        zf_u2f_adapter_handle_msg(app, request->session_id, request->payload, request->payload_len,
-                                  result->response, result->response_capacity);
-}
-
 static void zf_transport_dispatch_cbor(ZerofidoApp *app, const ZfProtocolDispatchRequest *request,
                                        ZfProtocolDispatchResult *result) {
     zf_transport_dispatch_begin(result, result->response, result->response_capacity);
@@ -87,7 +78,7 @@ static void zf_transport_dispatch_cbor(ZerofidoApp *app, const ZfProtocolDispatc
 
 static void zf_transport_dispatch_wink(ZerofidoApp *app, ZfProtocolDispatchResult *result) {
     zf_transport_dispatch_begin(result, result->response, result->response_capacity);
-    zf_u2f_adapter_wink(app);
+    zerofido_notify_wink(app);
 }
 
 static void zf_transport_dispatch_abort_if_interrupted(ZfTransportState *transport,
@@ -135,13 +126,6 @@ void zf_transport_dispatch_complete_message(ZerofidoApp *app, ZfTransportState *
     switch (request.protocol) {
     case ZfTransportProtocolKindPing:
         zf_transport_dispatch_ping(&request, &result);
-        break;
-    case ZfTransportProtocolKindU2f:
-        if (!capabilities.u2f_enabled) {
-            zf_transport_dispatch_reject_unsupported(app, &result);
-            break;
-        }
-        zf_transport_dispatch_u2f(app, &request, &result);
         break;
     case ZfTransportProtocolKindWink:
         if (!capabilities.transport_wink_enabled) {

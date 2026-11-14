@@ -195,23 +195,6 @@ static void test_pin_auth_blocks_after_three_mismatches(void) {
            "third pinAuth mismatch should auth-block");
 }
 
-static void test_ui_format_approval_header_prefixes_protocol(void) {
-    char out[32];
-
-    zf_ui_format_approval_header(out, sizeof(out), ZfUiProtocolFido2, "Authenticate");
-    expect(strcmp(out, "Use passkey") == 0, "FIDO2 approvals should use friendly passkey text");
-}
-
-static void test_ui_format_approval_body_uses_protocol_specific_target_label(void) {
-    char out[160];
-
-    zf_ui_format_approval_body(out, sizeof(out), ZfUiProtocolFido2, "example.com", "User: alice");
-    expect(!contains_text((const uint8_t *)out, strlen(out), "Protocol:"),
-           "FIDO2 approval body should hide protocol jargon");
-    expect(contains_text((const uint8_t *)out, strlen(out), "Website: example.com"),
-           "FIDO2 approval body should use website label");
-}
-
 static void test_ui_format_fido2_credential_label_uses_passkey_text(void) {
     ZfCredentialRecord record = {0};
     char out[128];

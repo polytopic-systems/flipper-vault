@@ -784,7 +784,7 @@ static bool zf_assets_ready(const ZfLocalAttestationProfile *profile) {
     return ready;
 }
 
-/* Lazy initialization entry point used by CTAP and U2F attestation paths. */
+/* Lazy initialization entry point used by the CTAP attestation path. */
 bool zf_local_attestation_ensure_assets(const ZfLocalAttestationProfile *profile) {
     zf_local_attestation_cleanup_storage(profile, false);
     if (zf_assets_ready(profile)) {

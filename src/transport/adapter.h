@@ -37,7 +37,7 @@ typedef struct {
 } ZfTransportAdapterOps;
 
 /*
- * Transport adapters let CTAP/U2F command code be agnostic to USB HID versus
+ * Transport adapters let CTAP command code be agnostic to USB HID versus
  * NFC. Each adapter owns its worker loop, response publication, keepalive/cancel
  * polling, and local user-interaction waiting semantics.
  */

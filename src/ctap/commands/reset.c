@@ -22,8 +22,6 @@
 #include "../core/internal.h"
 #include "../parse.h"
 #include "../policy.h"
-#include "../../u2f/adapter.h"
-#include "../../u2f/persistence.h"
 #include "../../zerofido_app_i.h"
 #include "../../zerofido_crypto.h"
 #include "../../zerofido_notify.h"
@@ -43,8 +41,8 @@ uint8_t zf_ctap_handle_reset(ZerofidoApp *app, ZfTransportSessionId session_id, 
         return status;
     }
 
-    status =
-        zf_ctap_request_approval(app, "Reset", "ZeroFIDO", "Erase credentials and PIN", session_id);
+    status = zf_ctap_request_approval(app, "Reset Vault", "Vault", "Erase credentials and PIN",
+                                      session_id);
     if (status != ZF_CTAP_SUCCESS) {
         return status;
     }
@@ -58,8 +56,7 @@ uint8_t zf_ctap_handle_reset(ZerofidoApp *app, ZfTransportSessionId session_id, 
     zf_ctap_assertion_queue_clear(app);
     furi_mutex_release(app->ui_mutex);
 
-    zf_u2f_adapter_deinit(app);
-    bool wiped = u2f_data_wipe(app->storage) && zf_store_wipe_app_data(app->storage);
+    bool wiped = zf_store_wipe_app_data(app->storage);
     ZfClientPinState next_pin_state = {0};
     ZfPinInitResult pin_init = wiped ? zerofido_pin_init_with_result(app->storage, &next_pin_state)
                                      : ZfPinInitStorageError;
@@ -82,10 +79,6 @@ uint8_t zf_ctap_handle_reset(ZerofidoApp *app, ZfTransportSessionId session_id, 
     if (!wiped || pin_init != ZfPinInitOk) {
         status = ZF_CTAP_ERR_OTHER;
         goto cleanup;
-    }
-
-    if (app->capabilities.u2f_enabled) {
-        (void)zf_u2f_adapter_init(app);
     }
 
     zerofido_notify_reset(app);

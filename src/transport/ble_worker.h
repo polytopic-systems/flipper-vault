@@ -34,7 +34,7 @@ typedef struct ZerofidoApp ZerofidoApp;
  * profile while running: it switches the Flipper's Bluetooth to the FIDO
  * profile on start and restores the default profile on stop. CTAP2 requests
  * (MSG) run on the worker thread through zerofido_handle_ctap2(), the same
- * dispatcher USB HID uses; U2F over BLE is not routed.
+ * dispatcher USB HID uses; CTAP1/U2F is not supported.
  */
 int32_t zf_transport_ble_worker(void *context);
 void zf_transport_ble_stop(ZerofidoApp *app);

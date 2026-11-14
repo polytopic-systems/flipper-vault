@@ -9,7 +9,6 @@ import unittest
 import unittest.mock
 from base64 import b64encode
 from datetime import datetime, timedelta, timezone
-from hashlib import sha1
 from pathlib import Path
 
 from cryptography import x509
@@ -37,7 +36,7 @@ class ExportCertificationMetadataTests(unittest.TestCase):
             "attestationRootCertificates": ["dGVzdC1yb290"],
             "authenticationAlgorithms": ["secp256r1_ecdsa_sha256_raw"],
             "authenticatorGetInfo": {
-                "versions": ["FIDO_2_0", "U2F_V2"],
+                "versions": ["FIDO_2_0"],
                 "extensions": ["credProtect", "hmac-secret"],
                 "aaguid": "b51a976a0b0240aa9d8a36c8b91bbd1a",
                 "options": {"rk": True, "up": True, "plat": False},
@@ -52,13 +51,13 @@ class ExportCertificationMetadataTests(unittest.TestCase):
             ],
         }
 
-    def build_test_u2f_cert_der(self) -> tuple[bytes, bytes]:
+    def build_test_cert_der(self) -> tuple[bytes, bytes]:
         key = ec.generate_private_key(ec.SECP256R1())
         subject = x509.Name(
             [
                 x509.NameAttribute(NameOID.COUNTRY_NAME, "BG"),
                 x509.NameAttribute(NameOID.ORGANIZATION_NAME, "ZeroFIDO Test"),
-                x509.NameAttribute(NameOID.COMMON_NAME, "ZeroFIDO Test U2F"),
+                x509.NameAttribute(NameOID.COMMON_NAME, "ZeroFIDO Test Attestation"),
             ]
         )
         cert = (
@@ -78,7 +77,7 @@ class ExportCertificationMetadataTests(unittest.TestCase):
         )
         return cert_der, public_key_bytes
 
-    def build_test_u2f_chain_der(self) -> tuple[bytes, bytes, bytes]:
+    def build_test_chain_der(self) -> tuple[bytes, bytes, bytes]:
         root_key = ec.generate_private_key(ec.SECP256R1())
         leaf_key = ec.generate_private_key(ec.SECP256R1())
         root_subject = x509.Name(
@@ -92,7 +91,7 @@ class ExportCertificationMetadataTests(unittest.TestCase):
             [
                 x509.NameAttribute(NameOID.COUNTRY_NAME, "BG"),
                 x509.NameAttribute(NameOID.ORGANIZATION_NAME, "ZeroFIDO Test"),
-                x509.NameAttribute(NameOID.COMMON_NAME, "ZeroFIDO Test U2F"),
+                x509.NameAttribute(NameOID.COMMON_NAME, "ZeroFIDO Test Attestation"),
             ]
         )
         root_cert = (
@@ -148,7 +147,7 @@ class ExportCertificationMetadataTests(unittest.TestCase):
 
     def test_build_certification_metadata_fido2_uses_self_issued_leaf_as_root(self) -> None:
         statement = self.load_statement()
-        cert_der, _ = self.build_test_u2f_cert_der()
+        cert_der, _ = self.build_test_cert_der()
 
         exported = build_certification_metadata(
             statement,
@@ -161,7 +160,7 @@ class ExportCertificationMetadataTests(unittest.TestCase):
 
     def test_build_certification_metadata_fido2_preserves_roots_for_subordinate_leaf(self) -> None:
         statement = self.load_statement()
-        root_der, leaf_der, _ = self.build_test_u2f_chain_der()
+        root_der, leaf_der, _ = self.build_test_chain_der()
         root_b64 = b64encode(root_der).decode("ascii")
         statement["attestationRootCertificates"] = [root_b64]
 
@@ -198,10 +197,8 @@ class ExportCertificationMetadataTests(unittest.TestCase):
 
         self.assertEqual(exported["legalHeader"], MDS3_LEGAL_HEADER)
         self.assertEqual(exported["upv"], [{"major": 1, "minor": 0}])
-        self.assertEqual(
-            exported["authenticatorGetInfo"]["versions"],
-            ["FIDO_2_0", "U2F_V2"],
-        )
+        # A stale U2F_V2 entry is dropped: legacy U2F (CTAP1) is not supported.
+        self.assertEqual(exported["authenticatorGetInfo"]["versions"], ["FIDO_2_0"])
         self.assertEqual(exported["authenticatorGetInfo"]["pinUvAuthProtocols"], [1])
         self.assertNotIn("pinUvAuthToken", exported["authenticatorGetInfo"]["options"])
         self.assertNotIn("makeCredUvNotRqd", exported["authenticatorGetInfo"]["options"])
@@ -217,7 +214,7 @@ class ExportCertificationMetadataTests(unittest.TestCase):
         self.assertEqual(exported["upv"], [{"major": 1, "minor": 1}, {"major": 1, "minor": 0}])
         self.assertEqual(
             exported["authenticatorGetInfo"]["versions"],
-            ["FIDO_2_1", "FIDO_2_0", "U2F_V2"],
+            ["FIDO_2_1", "FIDO_2_0"],
         )
         self.assertTrue(exported["authenticatorGetInfo"]["options"]["pinUvAuthToken"])
         self.assertTrue(exported["authenticatorGetInfo"]["options"]["makeCredUvNotRqd"])
@@ -274,12 +271,12 @@ class ExportCertificationMetadataTests(unittest.TestCase):
             "aaguid": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
             "authenticatorGetInfo": {
                 "aaguid": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
-                "versions": ["FIDO_2_0", "U2F_V2"],
+                "versions": ["FIDO_2_0"],
             },
             "userVerificationDetails": [[{"userVerificationMethod": "presence_internal"}]],
         }
         live_get_info = {
-            1: ["FIDO_2_0", "U2F_V2"],
+            1: ["FIDO_2_0"],
             3: bytes.fromhex("b51a976a0b0240aa9d8a36c8b91bbd1a"),
             4: {"rk": True, "up": True, "plat": False, "clientPin": False},
             5: 1024,
@@ -297,69 +294,17 @@ class ExportCertificationMetadataTests(unittest.TestCase):
             exported["authenticatorGetInfo"]["aaguid"],
             "b51a976a0b0240aa9d8a36c8b91bbd1a",
         )
-        self.assertEqual(
-            exported["authenticatorGetInfo"]["versions"],
-            ["FIDO_2_0", "U2F_V2"],
-        )
+        self.assertEqual(exported["authenticatorGetInfo"]["versions"], ["FIDO_2_0"])
         self.assertEqual(exported["userVerificationDetails"], [[{"userVerificationMethod": "presence_internal"}]])
 
-    def test_build_certification_metadata_u2f_profile_removes_fido2_only_fields(self) -> None:
+    def test_build_certification_metadata_rejects_removed_u2f_profile(self) -> None:
         statement = self.load_statement()
 
-        exported = build_certification_metadata(statement, profile="u2f")
+        with self.assertRaises(ValueError):
+            build_certification_metadata(statement, profile="u2f")
 
-        self.assertEqual(exported["protocolFamily"], "u2f")
-        self.assertEqual(exported["description"], "ZeroFIDO")
-        self.assertEqual(exported["authenticatorVersion"], 700)
-        self.assertEqual(exported["schema"], 3)
-        self.assertEqual(exported["upv"], [{"major": 1, "minor": 2}])
-        self.assertEqual(exported["authenticationAlgorithms"], ["secp256r1_ecdsa_sha256_raw"])
-        self.assertEqual(exported["publicKeyAlgAndEncodings"], ["ecc_x962_raw"])
-        self.assertEqual(exported["keyProtection"], ["software"])
-        self.assertEqual(exported["matcherProtection"], ["software"])
-        self.assertEqual(exported["tcDisplay"], [])
-        self.assertEqual(exported["icon"], ICON_DATA_URL)
-        self.assertEqual(exported["userVerificationDetails"], [[{"userVerificationMethod": "presence_internal"}]])
-        self.assertNotIn("aaguid", exported)
-        self.assertNotIn("aaid", exported)
-        self.assertNotIn("authenticatorGetInfo", exported)
-        self.assertNotIn("isSecondFactorOnly", exported)
-        self.assertNotIn("friendlyNames", exported)
-
-    def test_build_certification_metadata_u2f_profile_includes_attestation_cert_fields(self) -> None:
-        statement = self.load_statement()
-        cert_der, public_key_bytes = self.build_test_u2f_cert_der()
-
-        exported = build_certification_metadata(
-            statement,
-            profile="u2f",
-            u2f_attestation_cert_der=cert_der,
-        )
-
-        self.assertEqual(exported["attestationTypes"], ["basic_full"])
-        self.assertEqual(exported["attestationRootCertificates"], [b64encode(cert_der).decode("ascii")])
-        self.assertEqual(exported["attestationCertificateKeyIdentifiers"], [sha1(public_key_bytes).hexdigest()])
-
-    def test_build_certification_metadata_u2f_profile_preserves_statement_roots_for_subordinate_cert(
-        self,
-    ) -> None:
-        statement = self.load_statement()
-        root_der, leaf_der, leaf_public_key_bytes = self.build_test_u2f_chain_der()
-        root_b64 = b64encode(root_der).decode("ascii")
-        statement["attestationRootCertificates"] = [root_b64]
-
-        exported = build_certification_metadata(
-            statement,
-            profile="u2f",
-            u2f_attestation_cert_der=leaf_der,
-        )
-
-        self.assertEqual(exported["attestationTypes"], ["basic_full"])
-        self.assertEqual(exported["attestationRootCertificates"], [root_b64])
-        self.assertEqual(
-            exported["attestationCertificateKeyIdentifiers"],
-            [sha1(leaf_public_key_bytes).hexdigest()],
-        )
+    def test_default_statement_is_fido2_only(self) -> None:
+        self.assertEqual(DEFAULT_CANONICAL_STATEMENT["authenticatorGetInfo"]["versions"], ["FIDO_2_0"])
 
     def test_load_or_create_statement_creates_missing_parent_and_statement(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

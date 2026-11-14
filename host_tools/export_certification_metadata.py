@@ -1,8 +1,9 @@
 """Export certification-tool metadata from the canonical statement.
 
 The source metadata statement remains static and product-oriented; this tool
-normalizes profile-specific authenticatorGetInfo snapshots and U2F certificate
-fields into the JSON shapes expected by certification tooling.
+normalizes profile-specific authenticatorGetInfo snapshots into the JSON shapes
+expected by certification tooling. Vault is FIDO2-only: legacy U2F (CTAP1) was
+removed, so there is no U2F profile and GetInfo never lists U2F_V2.
 """
 
 from __future__ import annotations
@@ -10,14 +11,12 @@ from __future__ import annotations
 import argparse
 import base64
 import copy
-import hashlib
 import json
 from pathlib import Path
 from typing import Any
 
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import ec
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_METADATA_DIR = ROOT / "metadata"
@@ -31,7 +30,6 @@ CTAP20_VERSION = {"major": 1, "minor": 0}
 CTAP21_VERSION = {"major": 1, "minor": 1}
 FIDO20_VERSION_STRING = "FIDO_2_0"
 FIDO21_VERSION_STRING = "FIDO_2_1"
-U2F_VERSION_STRING = "U2F_V2"
 ICON_DATA_URL = (
     "data:image/png;base64,"
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+tm2cAAAAASUVORK5CYII="
@@ -48,7 +46,7 @@ DEFAULT_CANONICAL_STATEMENT: dict[str, Any] = {
     "publicKeyAlgAndEncodings": ["cose"],
     "keyProtection": ["software"],
     "authenticatorGetInfo": {
-        "versions": ["FIDO_2_0", "U2F_V2"],
+        "versions": ["FIDO_2_0"],
         "extensions": ["credProtect", "hmac-secret"],
         "aaguid": "b51a976a0b0240aa9d8a36c8b91bbd1a",
         "options": {"rk": True, "up": True, "plat": False},
@@ -193,14 +191,9 @@ def normalize_statement_get_info(get_info: Any, profile: str) -> dict[str, Any]:
         deduped_versions = []
 
     if profile == "fido2-2.1-experimental":
-        desired_versions = [FIDO21_VERSION_STRING, FIDO20_VERSION_STRING, U2F_VERSION_STRING]
+        normalized["versions"] = [FIDO21_VERSION_STRING, FIDO20_VERSION_STRING]
     else:
-        desired_versions = [FIDO20_VERSION_STRING, U2F_VERSION_STRING]
-    normalized["versions"] = [
-        version for version in desired_versions if version in deduped_versions or version != U2F_VERSION_STRING
-    ]
-    if U2F_VERSION_STRING in deduped_versions and U2F_VERSION_STRING not in normalized["versions"]:
-        normalized["versions"].append(U2F_VERSION_STRING)
+        normalized["versions"] = [FIDO20_VERSION_STRING]
 
     if "aaguid" in normalized and isinstance(normalized["aaguid"], str):
         normalized["aaguid"] = compact_aaguid(normalized["aaguid"])
@@ -252,20 +245,6 @@ def load_or_create_statement(path: Path) -> dict[str, Any]:
     return statement
 
 
-def compute_u2f_attestation_key_identifier(cert_der: bytes) -> str:
-    cert = x509.load_der_x509_certificate(cert_der)
-    public_key = cert.public_key()
-    if not isinstance(public_key, ec.EllipticCurvePublicKey):
-        raise ValueError("U2F attestation certificate must contain an EC public key")
-    if public_key.curve.name != "secp256r1":
-        raise ValueError(f"U2F attestation certificate must use P-256, got {public_key.curve.name}")
-    subject_public_key = public_key.public_bytes(
-        serialization.Encoding.X962,
-        serialization.PublicFormat.UncompressedPoint,
-    )
-    return hashlib.sha1(subject_public_key).hexdigest()
-
-
 def is_self_issued_certificate(cert_der: bytes) -> bool:
     cert = x509.load_der_x509_certificate(cert_der)
     return cert.issuer == cert.subject
@@ -288,52 +267,13 @@ def attestation_root_certificates_for_leaf(
     return copy.deepcopy(roots)
 
 
-def build_u2f_metadata(
-    statement: dict[str, Any],
-    u2f_attestation_cert_der: bytes | None = None,
-) -> dict[str, Any]:
-    exported = copy.deepcopy(statement)
-    exported.pop("aaguid", None)
-    exported.pop("aaid", None)
-    exported.pop("authenticatorGetInfo", None)
-    exported.pop("isSecondFactorOnly", None)
-    exported.pop("friendlyNames", None)
-    exported["description"] = exported.get("description", "ZeroFIDO")
-    exported["authenticatorVersion"] = exported.get("authenticatorVersion", 700)
-    exported["schema"] = 3
-    exported["protocolFamily"] = "u2f"
-    exported["upv"] = [{"major": 1, "minor": 2}]
-    exported["authenticationAlgorithms"] = exported.get(
-        "authenticationAlgorithms", ["secp256r1_ecdsa_sha256_raw"]
-    )
-    exported["publicKeyAlgAndEncodings"] = ["ecc_x962_raw"]
-    exported["userVerificationDetails"] = [[{"userVerificationMethod": "presence_internal"}]]
-    exported["keyProtection"] = ["software"]
-    exported["matcherProtection"] = ["software"]
-    exported["tcDisplay"] = []
-    exported["icon"] = ICON_DATA_URL
-    if u2f_attestation_cert_der is not None:
-        skid = compute_u2f_attestation_key_identifier(u2f_attestation_cert_der)
-        exported["attestationTypes"] = ["basic_full"]
-        exported["attestationRootCertificates"] = attestation_root_certificates_for_leaf(
-            statement,
-            u2f_attestation_cert_der,
-            "U2F",
-        )
-        exported["attestationCertificateKeyIdentifiers"] = [skid]
-    return exported
-
-
 def build_certification_metadata(
     statement: dict[str, Any],
     live_get_info: dict[Any, Any] | None = None,
     profile: str = "fido2",
     fido2_attestation_cert_der: bytes | None = None,
-    u2f_attestation_cert_der: bytes | None = None,
     client_pin_state: str = "unset",
 ) -> dict[str, Any]:
-    if profile == "u2f":
-        return build_u2f_metadata(statement, u2f_attestation_cert_der)
     if profile == "fido2":
         profile = "fido2-2.0"
     if profile not in ("fido2-2.0", "fido2-2.1-experimental"):
@@ -412,13 +352,9 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--profile",
-        choices=("fido2", "fido2-2.0", "fido2-2.1-experimental", "u2f"),
+        choices=("fido2", "fido2-2.0", "fido2-2.1-experimental"),
         default="fido2",
         help="Metadata profile to export for certification tooling. fido2 aliases fido2-2.0.",
-    )
-    parser.add_argument(
-        "--u2f-attestation-cert",
-        help="DER or PEM U2F attestation certificate returned by this device's U2F Register response",
     )
     parser.add_argument(
         "--fido2-attestation-cert",
@@ -449,32 +385,16 @@ def main() -> int:
 
     statement = load_or_create_statement(statement_path)
     fido2_cert_der = None
-    u2f_cert_der = None
-    if args.u2f_attestation_cert:
-        if args.profile != "u2f":
-            raise SystemExit("--u2f-attestation-cert is only valid with --profile u2f")
-        try:
-            u2f_cert_der = load_certificate_der(Path(args.u2f_attestation_cert))
-        except ValueError as exc:
-            raise SystemExit(str(exc)) from exc
     if args.fido2_attestation_cert:
-        if args.profile == "u2f":
-            raise SystemExit("--fido2-attestation-cert is only valid with FIDO2 profiles")
         try:
             fido2_cert_der = load_certificate_der(Path(args.fido2_attestation_cert))
         except ValueError as exc:
             raise SystemExit(str(exc)) from exc
-    if args.profile == "u2f" and u2f_cert_der is None:
-        raise SystemExit(
-            "--profile u2f requires --u2f-attestation-cert. "
-            "Use host_tools/ctaphid_probe.py --cmd u2fregister --u2f-cert-out first."
-        )
 
     exported = build_certification_metadata(
         statement,
         profile=args.profile,
         fido2_attestation_cert_der=fido2_cert_der,
-        u2f_attestation_cert_der=u2f_cert_der,
         client_pin_state=args.client_pin_state,
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)

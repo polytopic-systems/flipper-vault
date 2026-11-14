@@ -116,7 +116,6 @@ typedef struct {
     uint32_t outcome_at;
     uint32_t deadline;
     VaultApprovalPhase phase;
-    bool u2f;
     char header[24];
     char site[256]; /* full RP ID: never shortened */
     char account[140];

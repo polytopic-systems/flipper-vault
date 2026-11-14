@@ -28,7 +28,6 @@ typedef struct ZfTransportState ZfTransportState;
 
 typedef enum {
     ZfTransportProtocolKindPing = 0,
-    ZfTransportProtocolKindU2f = 1,
     ZfTransportProtocolKindCtap2 = 2,
     ZfTransportProtocolKindWink = 3,
 } ZfTransportProtocolKind;
@@ -50,7 +49,7 @@ typedef struct {
 
 /*
  * Common protocol handoff used by USB HID and NFC. Transport code identifies
- * the protocol kind and arena; this function runs CTAP/U2F/WINK handling and
+ * the protocol kind and arena; this function runs CTAP2/PING/WINK handling and
  * returns a transport-neutral dispatch result.
  */
 void zf_transport_dispatch_complete_message(ZerofidoApp *app, ZfTransportState *transport,

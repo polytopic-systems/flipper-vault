@@ -22,11 +22,6 @@
 
 #include "zerofido_types.h"
 
-typedef enum {
-    ZfUiProtocolFido2 = 0,
-    ZfUiProtocolU2f = 1,
-} ZfUiProtocol;
-
 /*
  * Formatting helpers keep UI labels consistent between the credential browser,
  * approval prompts, and assertion account picker. They prefer user/RP labels
@@ -41,10 +36,6 @@ void zf_ui_format_passkey_index_title(const ZfCredentialIndexEntry *entry, char 
 void zf_ui_format_passkey_index_subtitle(const ZfCredentialIndexEntry *entry, char *out,
                                          size_t out_size);
 void zf_ui_format_passkey_title(const ZfCredentialRecord *record, char *out, size_t out_size);
-void zf_ui_format_approval_header(char *out, size_t out_size, ZfUiProtocol protocol,
-                                  const char *operation);
-void zf_ui_format_approval_body(char *out, size_t out_size, ZfUiProtocol protocol,
-                                const char *target_id, const char *user_text);
 void zf_ui_format_assertion_selection_index_label(const ZfCredentialIndexEntry *entry, char *out,
                                                   size_t out_size);
 void zf_ui_format_assertion_selection_record_label(const ZfCredentialRecord *record, char *out,

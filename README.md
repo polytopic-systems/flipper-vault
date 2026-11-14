@@ -1,13 +1,13 @@
 ![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)
 ![Platform: Flipper Zero](https://img.shields.io/badge/platform-Flipper%20Zero-orange)
-![Protocols: FIDO2 + U2F](https://img.shields.io/badge/protocols-FIDO2%20%2B%20U2F-green)
+![Protocols: FIDO2](https://img.shields.io/badge/protocols-FIDO2-green)
 
 ![ZeroFIDO banner: FIDO2 for Flipper Zero](docs/assets/zerofido-banner.png)
 
 <h3 align="center">⚠️ ⚠️ Experimental software. Updates may break it. Keep backup sign-in methods. ⚠️ ⚠️</h3>
 
 ZeroFIDO turns a Flipper Zero into a passkey and security-key app. Install the `.fap`,
-open ZeroFIDO, and approve sign-ins on services that support FIDO2/WebAuthn or legacy U2F.
+open ZeroFIDO, and approve sign-ins on services that support FIDO2/WebAuthn passkeys.
 
 The app stores credentials on the Flipper, asks for local approval, supports `ClientPIN`,
 and speaks the CTAP2/FIDO2 protocol used by browsers and security keys. USB HID handles
@@ -16,8 +16,9 @@ desktop browser flows. NFC builds handle phone flows.
 NFC has been tested on iPhone. Android NFC support is next. In the meantime, connect the
 Flipper to the phone over USB when the phone accepts USB security keys.
 
-U2F and FIDO2.0 pass their respective tests in the current FIDO Conformance Tools suite. FIDO2.1
-support is in development behind a developer-only build flag. Bug reports, feature requests, and
+FIDO2.0 passes the current FIDO Conformance Tools suite. Legacy U2F (CTAP1) was removed in
+Vault so the app fits in the Flipper's memory; FIDO2.1 support is in development behind a
+developer-only build flag. Bug reports, feature requests, and
 pull requests are welcome.
 
 ## Showcase
@@ -70,7 +71,7 @@ pull requests are welcome.
 | --- | --- |
 | USB HID | Supported in the `usb` and `full` release profiles |
 | NFC | Supported in the `nfc` and `full` release profiles |
-| U2F V2 | Supported |
+| U2F V2 (CTAP1) | Not supported: removed to fit in memory. USB answers `CTAPHID_MSG` with `ERR_INVALID_CMD` (INIT sets `CAPABILITY_NMSG`); NFC SELECT returns `FIDO_2_0` and CTAP1 APDUs get `6D00`. |
 | FIDO2.0 / CTAP2.0 | Supported |
 | FIDO2.1 / CTAP2.1 | Developer-only experimental build flag |
 | `ClientPIN` | Supported |
@@ -165,7 +166,7 @@ the stable FIDO2.0 profile enabled by default. Release builds default to
 
 | Profile | Build flag | Use |
 | --- | --- | --- |
-| USB HID only | `ZEROFIDO_PROFILE=usb` | Default; desktop browser WebAuthn and U2F testing. |
+| USB HID only | `ZEROFIDO_PROFILE=usb` | Default; desktop browser WebAuthn testing. |
 | NFC only | `ZEROFIDO_PROFILE=nfc` | Phone and NFC conformance work. |
 | Full | `ZEROFIDO_PROFILE=full` | Both transports in one app. |
 
@@ -245,14 +246,11 @@ uv run python host_tools/ctaphid_probe.py --cmd makecredential
 uv run python host_tools/ctaphid_probe.py --cmd getassertion
 ```
 
-Run U2F transport probes:
+Check that legacy U2F (CTAP1) is refused (INIT sets `CAPABILITY_NMSG`, `CTAPHID_MSG` gets
+`ERR_INVALID_CMD`):
 
 ```bash
-uv run python host_tools/ctaphid_probe.py --cmd u2fversion
-uv run python host_tools/ctaphid_probe.py --cmd u2fregister --u2f-cert-out metadata/u2f-attestation.der
-uv run python host_tools/ctaphid_probe.py --cmd u2finvalidcla
-uv run python host_tools/ctaphid_probe.py --cmd u2fversiondata
-uv run python host_tools/ctaphid_probe.py --cmd u2fauthinvalid
+uv run python host_tools/ctaphid_probe.py --cmd ctap1rejected
 ```
 
 Capture a FIDO2 attestation leaf certificate from `MakeCredential`:
@@ -364,23 +362,7 @@ uv run python host_tools/export_certification_metadata.py \
   --fido2-attestation-cert metadata/fido2-attestation.der
 ```
 
-For U2F, export metadata from the certificate returned by U2F Register:
-
-```bash
-uv run python host_tools/ctaphid_probe.py \
-  --cmd u2fregister \
-  --u2f-cert-out metadata/u2f-attestation.der
-
-uv run python host_tools/export_certification_metadata.py \
-  --statement metadata/statement.json \
-  --profile u2f \
-  --u2f-attestation-cert metadata/u2f-attestation.der
-```
-
-If U2F metadata reports an attestation SKID or certificate-path mismatch, regenerate
-`metadata/u2f-attestation.der` and `metadata/metadata-u2f.json` from the same device build you are
-testing. Older builds regenerated U2F attestation during reset, so metadata captured before a reset
-can be stale.
+There is no U2F metadata profile: Vault is FIDO2-only.
 
 If the conformance tool changes PIN state, regenerate metadata with the matching
 `--client-pin-state` before rerunning that profile.

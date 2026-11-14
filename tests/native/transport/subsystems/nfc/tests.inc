@@ -64,7 +64,8 @@ static void test_nfc_select_applet_accepts_p2_no_fci(void) {
     test_nfc_deinit_app(&app);
 }
 
-static void test_nfc_select_applet_returns_fido2_version_when_u2f_disabled(void) {
+/* A FIDO2-only authenticator answers applet SELECT with "FIDO_2_0" (no U2F_V2). */
+static void test_nfc_select_applet_returns_fido_2_0(void) {
     ZerofidoApp app;
     FuriMutex mutex = {0};
     const uint8_t *payload = NULL;
@@ -76,7 +77,6 @@ static void test_nfc_select_applet_returns_fido2_version_when_u2f_disabled(void)
     test_nfc_init_app(&app, &mutex);
     zf_runtime_config_load_defaults(&app.runtime_config);
     app.runtime_config.transport_mode = ZfTransportModeNfc;
-    app.runtime_config.u2f_enabled = false;
     zf_runtime_config_resolve_capabilities(&app.runtime_config, &app.capabilities);
     app.capabilities_resolved = true;
 
@@ -148,10 +148,10 @@ static void test_nfc_event_callback_accepts_bare_select_apdu(void) {
            "bare SELECT APDU should be accepted through the NFC listener callback");
     expect(app.transport_nfc_state_storage.applet_selected,
            "bare SELECT APDU should select the FIDO applet");
-    expect(g_last_nfc_tx_len == 11U && g_last_nfc_tx[0] == 0x02 &&
-               memcmp(&g_last_nfc_tx[1], "U2F_V2", 6) == 0 && g_last_nfc_tx[7] == 0x90 &&
-               g_last_nfc_tx[8] == 0x00,
-           "bare SELECT APDU should still return U2F_V2 plus SW_SUCCESS inside an I-block");
+    expect(g_last_nfc_tx_len == 13U && g_last_nfc_tx[0] == 0x02 &&
+               memcmp(&g_last_nfc_tx[1], "FIDO_2_0", 8) == 0 && g_last_nfc_tx[9] == 0x90 &&
+               g_last_nfc_tx[10] == 0x00,
+           "bare SELECT APDU should still return FIDO_2_0 plus SW_SUCCESS inside an I-block");
 
     bit_buffer_free(buffer);
     test_nfc_deinit_app(&app);
@@ -184,9 +184,9 @@ static void test_nfc_iso4_listener_event_decodes_block_and_sends_framed_response
            "ISO14443-4A listener event should decode ISO-DEP blocks before APDU dispatch");
     expect(app.transport_nfc_state_storage.applet_selected,
            "decoded APDU SELECT should select the FIDO applet");
-    expect(g_last_nfc_tx_len == 11U && g_last_nfc_tx[0] == 0x02 &&
-               memcmp(&g_last_nfc_tx[1], "U2F_V2", 6) == 0 && g_last_nfc_tx[7] == 0x90 &&
-               g_last_nfc_tx[8] == 0x00,
+    expect(g_last_nfc_tx_len == 13U && g_last_nfc_tx[0] == 0x02 &&
+               memcmp(&g_last_nfc_tx[1], "FIDO_2_0", 8) == 0 && g_last_nfc_tx[9] == 0x90 &&
+               g_last_nfc_tx[10] == 0x00,
            "decoded APDU SELECT should send a framed ISO-DEP response through the backport");
 
     bit_buffer_free(buffer);
@@ -260,8 +260,7 @@ static void test_nfc_iso4_duplicate_final_chain_block_replays_response(void) {
         .event_data = &listener_event,
     };
     static const uint8_t select_first[] = {0x12, 0x00, 0xA4, 0x04, 0x00, 0x08};
-    static const uint8_t select_final[] = {0x03, 0xA0, 0x00, 0x00, 0x06,
-                                           0x47, 0x2F, 0x00, 0x01};
+    static const uint8_t select_final[] = {0x03, 0xA0, 0x00, 0x00, 0x06, 0x47, 0x2F, 0x00, 0x01};
     uint8_t cached_response[sizeof(g_last_nfc_tx)] = {0};
     size_t cached_response_len = 0U;
     ZfTransportSessionId selected_session_id = 0U;
@@ -314,8 +313,7 @@ static void test_nfc_duplicate_i_block_preserves_tx_chain_pcb(void) {
         .instance = &listener,
         .event_data = &listener_event,
     };
-    uint8_t ctap2_block[48] = {0x02, 0x80, 0x10, 0x00, 0x00, 0x00,
-                               0x00, 0x28, ZfCtapeCmdClientPin};
+    uint8_t ctap2_block[48] = {0x02, 0x80, 0x10, 0x00, 0x00, 0x00, 0x00, 0x28, ZfCtapeCmdClientPin};
     const size_t response_len = ZF_NFC_MAX_TX_FRAME_INF_SIZE + 50U;
     uint8_t first_response[sizeof(g_last_nfc_tx)] = {0};
     size_t first_response_len = 0U;
@@ -637,9 +635,9 @@ static void test_nfc_3a_iso_dep_select_decodes_and_responds(void) {
            "3A ISO-DEP SELECT should select the FIDO applet");
     expect(g_last_nfc_tx[0] == 0x02, "3A ISO-DEP response should be an I-block");
     payload = test_nfc_payload();
-    expect(test_nfc_payload_len() == 8U && memcmp(payload, "U2F_V2", 6) == 0 &&
-               payload[6] == 0x90 && payload[7] == 0x00,
-           "3A ISO-DEP SELECT should return U2F_V2 plus SW_SUCCESS");
+    expect(test_nfc_payload_len() == 10U && memcmp(payload, "FIDO_2_0", 8) == 0 &&
+               payload[8] == 0x90 && payload[9] == 0x00,
+           "3A ISO-DEP SELECT should return FIDO_2_0 plus SW_SUCCESS");
 
     bit_buffer_free(buffer);
     test_nfc_deinit_app(&app);
@@ -1280,9 +1278,9 @@ static void test_nfc_framed_select_response_uses_reader_block_number(void) {
     expect(g_last_nfc_tx[0] == 0x03,
            "framed SELECT response should use the reader ISO-DEP block number");
     payload = test_nfc_payload();
-    expect(test_nfc_payload_len() == 8 && memcmp(payload, "U2F_V2", 6) == 0 && payload[6] == 0x90 &&
-               payload[7] == 0x00,
-           "framed SELECT APDU should return U2F_V2 plus SW_SUCCESS inside an I-block");
+    expect(test_nfc_payload_len() == 10U && memcmp(payload, "FIDO_2_0", 8) == 0 &&
+               payload[8] == 0x90 && payload[9] == 0x00,
+           "framed SELECT APDU should return FIDO_2_0 plus SW_SUCCESS inside an I-block");
 
     bit_buffer_free(buffer);
     test_nfc_deinit_app(&app);
@@ -2335,7 +2333,7 @@ static void test_nfc_stale_worker_completion_preserves_new_request(void) {
 
     zf_transport_nfc_store_response(&app, &app.transport_nfc_state_storage, old_session,
                                     old_generation, stale_response, sizeof(stale_response), false,
-                                    false, ZF_NFC_SW_SUCCESS);
+                                    ZF_NFC_SW_SUCCESS);
     expect(app.transport_nfc_state_storage.processing &&
                app.transport_nfc_state_storage.request_pending,
            "stale NFC completion should not clear the newer queued request");
@@ -2404,189 +2402,66 @@ static void test_nfc_ctap_control_end_clears_selected_applet(void) {
     test_nfc_deinit_app(&app);
 }
 
-static void test_nfc_u2f_version_returns_immediately(void) {
+/*
+ * Legacy U2F (CTAP1) was removed. After the FIDO applet SELECT, every CTAP1 APDU
+ * (CLA=00, INS VERSION/REGISTER/AUTHENTICATE) gets SW_INS_NOT_SUPPORTED at once:
+ * no queued work, no approval prompt, and the applet stays selected for CTAP2.
+ */
+static void test_nfc_ctap1_apdus_after_select_return_ins_not_supported(void) {
+    static const uint8_t version_apdu[] = {0x00, 0x03, 0x00, 0x00, 0x00};
+    uint8_t register_apdu[5 + 64] = {0x00, 0x01, 0x03, 0x00, 64};
+    uint8_t authenticate_apdu[5 + 32 + 32 + 1 + 64] = {0x00, 0x02, 0x07, 0x00, 129};
+    const uint8_t *const apdus[] = {version_apdu, register_apdu, authenticate_apdu};
+    const size_t apdu_lens[] = {sizeof(version_apdu), sizeof(register_apdu),
+                                sizeof(authenticate_apdu)};
     ZerofidoApp app;
     FuriMutex mutex = {0};
-    static const uint8_t version_apdu[] = {0x00, U2F_CMD_VERSION, 0x00, 0x00, 0x00};
     const uint8_t *payload = NULL;
 
-    test_reset();
-    test_nfc_init_app(&app, &mutex);
-    zf_runtime_config_load_defaults(&app.runtime_config);
-    zf_runtime_config_resolve_capabilities(&app.runtime_config, &app.capabilities);
-    app.capabilities_resolved = true;
-    expect(zf_u2f_adapter_init(&app), "U2F should initialize before NFC VERSION");
-    test_nfc_select_applet(&app);
-
-    expect(zf_transport_nfc_handle_apdu(&app, &app.transport_nfc_state_storage, version_apdu,
-                                        sizeof(version_apdu)),
-           "U2F VERSION APDU should complete immediately after SELECT");
-    payload = test_nfc_payload();
-    expect(test_nfc_payload_len() == 8, "U2F VERSION should return U2F_V2 plus SW_SUCCESS");
-    expect(memcmp(payload, "U2F_V2", 6) == 0, "U2F VERSION should return U2F_V2 over NFC");
-    expect(payload[6] == 0x90 && payload[7] == 0x00,
-           "U2F VERSION over NFC should terminate with SW_SUCCESS");
-    expect(!app.transport_nfc_state_storage.processing &&
-               !app.transport_nfc_state_storage.request_pending,
-           "U2F VERSION over NFC should not leave a queued background request");
-    expect(test_log_contains("U2F VERSION"),
-           "U2F VERSION over NFC should expose the immediate-version breadcrumb");
-
-    zf_u2f_adapter_deinit(&app);
-    test_nfc_deinit_app(&app);
-}
-
-static void test_nfc_u2f_version_fallback_selects_fido_surface(void) {
-    ZerofidoApp app;
-    FuriMutex mutex = {0};
-    static const uint8_t version_apdu[] = {0x00, U2F_CMD_VERSION, 0x00, 0x00, 0x00};
-    const uint8_t *payload = NULL;
-
-    test_reset();
-    test_nfc_init_app(&app, &mutex);
-    zf_runtime_config_load_defaults(&app.runtime_config);
-    zf_runtime_config_resolve_capabilities(&app.runtime_config, &app.capabilities);
-    app.capabilities_resolved = true;
-
-    expect(zf_transport_nfc_handle_apdu(&app, &app.transport_nfc_state_storage, version_apdu,
-                                        sizeof(version_apdu)),
-           "pre-SELECT U2F VERSION fallback should complete immediately");
-    payload = test_nfc_payload();
-    expect(test_nfc_payload_len() == 8U && memcmp(payload, "U2F_V2", 6) == 0 &&
-               payload[6] == 0x90 && payload[7] == 0x00,
-           "pre-SELECT U2F VERSION fallback should return U2F_V2 plus SW_SUCCESS");
-    expect(app.transport_nfc_state_storage.applet_selected,
-           "pre-SELECT U2F VERSION fallback should select the FIDO surface");
-    expect(test_log_contains("U2F VERSION fallback"),
-           "pre-SELECT U2F VERSION fallback should expose the fallback breadcrumb");
-
-    test_nfc_deinit_app(&app);
-}
-
-static void test_nfc_u2f_disabled_rejects_immediately_without_processing(void) {
-    ZerofidoApp app;
-    FuriMutex mutex = {0};
-    static const uint8_t version_apdu[] = {0x00, U2F_CMD_VERSION, 0x00, 0x00, 0x00};
-    const uint8_t *payload = NULL;
-
-    test_reset();
-    test_nfc_init_app(&app, &mutex);
-    zf_runtime_config_load_defaults(&app.runtime_config);
-    app.runtime_config.transport_mode = ZfTransportModeNfc;
-    app.runtime_config.u2f_enabled = false;
-    zf_runtime_config_resolve_capabilities(&app.runtime_config, &app.capabilities);
-    app.capabilities_resolved = true;
-    test_nfc_select_applet(&app);
-
-    expect(zf_transport_nfc_handle_apdu(&app, &app.transport_nfc_state_storage, version_apdu,
-                                        sizeof(version_apdu)),
-           "disabled U2F should still return a status word over NFC");
-    payload = test_nfc_payload();
-    expect(test_nfc_payload_len() == 2 && payload[0] == 0x6D && payload[1] == 0x00,
-           "disabled U2F should reject NFC U2F APDUs with SW_INS_NOT_SUPPORTED");
-    expect(!app.transport_nfc_state_storage.processing &&
-               !app.transport_nfc_state_storage.request_pending,
-           "disabled U2F should not queue NFC background processing");
-
-    test_nfc_deinit_app(&app);
-}
-
-static void test_nfc_u2f_check_only_authenticate_returns_immediately(void) {
-    ZerofidoApp app;
-    FuriMutex mutex = {0};
-    uint8_t authenticate_apdu[7 + U2F_CHALLENGE_SIZE + U2F_APP_ID_SIZE + 1 + 64] = {
-        0x00,
-        U2F_CMD_AUTHENTICATE,
-        U2fCheckOnly,
-        0x00,
-        0x00,
-        0x00,
-        U2F_CHALLENGE_SIZE + U2F_APP_ID_SIZE + 1 + 64,
-    };
-    const uint8_t *payload = NULL;
-
+    authenticate_apdu[5 + 64] = 64;
     test_reset();
     test_nfc_init_app(&app, &mutex);
     zf_runtime_config_load_defaults(&app.runtime_config);
     zf_runtime_config_resolve_capabilities(&app.runtime_config, &app.capabilities);
     app.capabilities_resolved = true;
     test_nfc_select_applet(&app);
-    authenticate_apdu[7 + U2F_CHALLENGE_SIZE + U2F_APP_ID_SIZE] = 64;
 
-    expect(zf_transport_nfc_handle_apdu(&app, &app.transport_nfc_state_storage, authenticate_apdu,
-                                        sizeof(authenticate_apdu)),
-           "U2F check-only AUTHENTICATE over NFC should complete immediately");
-    payload = test_nfc_payload();
-    expect(test_nfc_payload_len() == 2U,
-           "U2F check-only AUTHENTICATE should return a status word without STATUS_UPDATE");
-    expect(payload[0] == 0x69 && payload[1] == 0x85,
-           "valid U2F check-only AUTHENTICATE should report user presence required");
-    expect(!app.transport_nfc_state_storage.processing &&
-               !app.transport_nfc_state_storage.request_pending,
-           "U2F check-only AUTHENTICATE must not leave a queued NFC request");
-    expect(g_approval_request_count == 0U,
-           "U2F check-only AUTHENTICATE must not ask for local approval");
-    expect(test_log_contains("U2F check-only"),
-           "U2F check-only AUTHENTICATE should expose the immediate U2F breadcrumb");
-
-    zf_u2f_adapter_deinit(&app);
-    test_nfc_deinit_app(&app);
-}
-
-static void test_nfc_u2f_register_returns_without_status_update(void) {
-    ZerofidoApp app;
-    FuriMutex mutex = {0};
-    uint8_t register_apdu[5 + U2F_CHALLENGE_SIZE + U2F_APP_ID_SIZE] = {
-        0x00, U2F_CMD_REGISTER, 0x00, 0x00, U2F_CHALLENGE_SIZE + U2F_APP_ID_SIZE,
-    };
-    static const uint8_t get_response_apdu[] = {0x00, ZF_NFC_INS_ISO_GET_RESPONSE, 0x00, 0x00,
-                                                0x00};
-    const uint8_t *payload = NULL;
-    size_t payload_len = 0U;
-    size_t guard = 0U;
-
-    test_reset();
-    test_nfc_init_app(&app, &mutex);
-    zf_runtime_config_load_defaults(&app.runtime_config);
-    zf_runtime_config_resolve_capabilities(&app.runtime_config, &app.capabilities);
-    app.capabilities_resolved = true;
-    expect(zf_u2f_adapter_init(&app), "U2F should initialize before NFC REGISTER");
-    test_nfc_select_applet(&app);
-    memset(&register_apdu[5], 0xA5, U2F_CHALLENGE_SIZE);
-    memset(&register_apdu[5 + U2F_CHALLENGE_SIZE], 0x5A, U2F_APP_ID_SIZE);
-
-    expect(zf_transport_nfc_handle_apdu(&app, &app.transport_nfc_state_storage, register_apdu,
-                                        sizeof(register_apdu)),
-           "U2F REGISTER over NFC should complete on the raw APDU path");
-    payload = test_nfc_payload();
-    payload_len = test_nfc_payload_len();
-    expect(!(payload_len == 3U && payload[0] == ZF_NFC_STATUS_PROCESSING && payload[1] == 0x91 &&
-             payload[2] == 0x00),
-           "U2F REGISTER over NFC must not use CTAP STATUS_UPDATE polling");
-    expect(!app.transport_nfc_state_storage.processing &&
-               !app.transport_nfc_state_storage.request_pending,
-           "U2F REGISTER over NFC must not leave a queued background request");
-    expect(g_approval_request_count == 0U,
-           "U2F REGISTER over NFC should use transport presence instead of approval UI");
-
-    while (payload_len >= 2U && payload[payload_len - 2U] == 0x61U && guard++ < 8U) {
-        expect(zf_transport_nfc_handle_apdu(&app, &app.transport_nfc_state_storage,
-                                            get_response_apdu, sizeof(get_response_apdu)),
-               "U2F REGISTER ISO response chain should continue via GET RESPONSE");
+    for (size_t i = 0; i < sizeof(apdus) / sizeof(apdus[0]); ++i) {
+        expect(zf_transport_nfc_handle_apdu(&app, &app.transport_nfc_state_storage, apdus[i],
+                                            apdu_lens[i]),
+               "CTAP1 APDU should be answered immediately");
         payload = test_nfc_payload();
-        payload_len = test_nfc_payload_len();
-        expect(!(payload_len == 3U && payload[0] == ZF_NFC_STATUS_PROCESSING &&
-                 payload[1] == 0x91 && payload[2] == 0x00),
-               "U2F REGISTER response chaining must not use CTAP STATUS_UPDATE polling");
+        expect(test_nfc_payload_len() == 2U && payload[0] == 0x6D && payload[1] == 0x00,
+               "CTAP1 APDU should get SW_INS_NOT_SUPPORTED (6D00)");
+        expect(!app.transport_nfc_state_storage.request_pending &&
+                   !app.transport_nfc_state_storage.processing,
+               "CTAP1 APDU must not queue NFC background work");
+        expect(app.transport_nfc_state_storage.applet_selected,
+               "CTAP1 APDU must leave the FIDO applet selected for CTAP2");
     }
+    expect(g_approval_request_count == 0, "CTAP1 APDUs must not prompt the user");
 
-    expect(payload_len >= 2U && payload[payload_len - 2U] == 0x90 &&
-               payload[payload_len - 1U] == 0x00,
-           "U2F REGISTER over NFC should finish with the U2F success status word");
-    expect(test_log_contains("U2F immediate"),
-           "U2F REGISTER over NFC should expose the immediate U2F breadcrumb");
+    test_nfc_deinit_app(&app);
+}
 
-    zf_u2f_adapter_deinit(&app);
+/* Without SELECT, a U2F VERSION probe no longer bootstraps the FIDO surface. */
+static void test_nfc_preselect_ctap1_version_is_rejected(void) {
+    static const uint8_t version_apdu[] = {0x00, 0x03, 0x00, 0x00, 0x00};
+    ZerofidoApp app;
+    FuriMutex mutex = {0};
+    const uint8_t *payload = NULL;
+
+    test_reset();
+    test_nfc_init_app(&app, &mutex);
+    expect(zf_transport_nfc_handle_apdu(&app, &app.transport_nfc_state_storage, version_apdu,
+                                        sizeof(version_apdu)),
+           "pre-SELECT CTAP1 VERSION should be answered with a status word");
+    payload = test_nfc_payload();
+    expect(test_nfc_payload_len() == 2U && payload[0] == 0x69 && payload[1] == 0x85,
+           "pre-SELECT CTAP1 VERSION should get SW_CONDITIONS_NOT_SATISFIED (6985)");
+    expect(!app.transport_nfc_state_storage.applet_selected,
+           "pre-SELECT CTAP1 VERSION must not select the FIDO applet");
+
     test_nfc_deinit_app(&app);
 }
 
@@ -2705,10 +2580,10 @@ static void test_nfc_ctap_get_response_ins_11_reports_processing_with_advertised
     test_nfc_deinit_app(&app);
 }
 
-static void test_nfc_busy_u2f_request_preserves_shared_arena(void) {
+static void test_nfc_busy_ctap1_apdu_preserves_shared_arena(void) {
     ZerofidoApp app;
     FuriMutex mutex = {0};
-    static const uint8_t version_apdu[] = {0x00, U2F_CMD_VERSION, 0x00, 0x00, 0x00};
+    static const uint8_t version_apdu[] = {0x00, 0x03, 0x00, 0x00, 0x00};
     const uint8_t *payload = NULL;
 
     test_reset();
@@ -2723,14 +2598,14 @@ static void test_nfc_busy_u2f_request_preserves_shared_arena(void) {
 
     expect(zf_transport_nfc_handle_apdu(&app, &app.transport_nfc_state_storage, version_apdu,
                                         sizeof(version_apdu)),
-           "busy NFC U2F request should return a status-update response");
+           "CTAP1 APDU during CTAP2 processing should still be answered");
     payload = test_nfc_payload();
-    expect(test_nfc_payload_len() == 3U,
-           "busy NFC U2F request should return processing status plus SW");
-    expect(payload[0] == ZF_NFC_STATUS_PROCESSING && payload[1] == 0x91 && payload[2] == 0x00,
-           "busy NFC U2F request should report STATUS_UPDATE");
+    expect(test_nfc_payload_len() == 2U && payload[0] == 0x6D && payload[1] == 0x00,
+           "CTAP1 APDU during CTAP2 processing should get SW_INS_NOT_SUPPORTED");
+    expect(app.transport_nfc_state_storage.request_pending,
+           "CTAP1 APDU must not disturb the queued CTAP2 request");
     expect(app.transport_arena[0] == 0xAB && app.transport_arena[1] == 0xCD,
-           "busy NFC U2F request should not clobber the shared arena");
+           "CTAP1 APDU must not clobber the shared arena");
 
     test_nfc_deinit_app(&app);
 }
@@ -3086,8 +2961,8 @@ static void test_nfc_raw60_does_not_make_next_framed_select_bare(void) {
     expect(g_last_nfc_tx[0] == 0x03,
            "framed SELECT after raw 0x60 should receive an ISO-DEP I-block response");
     payload = test_nfc_payload();
-    expect(test_nfc_payload_len() == 8U && memcmp(payload, "U2F_V2", 6) == 0 &&
-               payload[6] == 0x90 && payload[7] == 0x00,
+    expect(test_nfc_payload_len() == 10U && memcmp(payload, "FIDO_2_0", 8) == 0 &&
+               payload[8] == 0x90 && payload[9] == 0x00,
            "framed SELECT after raw 0x60 should not be sent as a bare APDU response");
 
     bit_buffer_free(buffer);

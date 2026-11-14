@@ -32,6 +32,12 @@ uint8_t *zf_pin_protocol_aes_key(uint8_t keys[ZF_PIN_PROTOCOL_KEYS_LEN]) {
     return keys + ZF_PIN_PROTOCOL_KEY_LEN;
 }
 
+/*
+ * PIN protocol 2 is a CTAP 2.1 feature, reachable only in ZF_DEV_FIDO2_1 builds
+ * (release builds reject it before any of these helpers run).
+ */
+#define ZF_PIN_PROTOCOL_V2_BUILT (ZF_DEV_FIDO2_1 != 0)
+
 bool zf_pin_protocol_supported(uint64_t pin_protocol) {
     return pin_protocol == ZF_PIN_PROTOCOL_V1 || pin_protocol == ZF_PIN_PROTOCOL_V2;
 }
@@ -67,7 +73,7 @@ bool zf_pin_protocol_derive_keys(const ZfClientPinState *state, uint64_t pin_pro
                ZF_PIN_PROTOCOL_KEY_LEN);
         return true;
     }
-    if (pin_protocol != ZF_PIN_PROTOCOL_V2) {
+    if (!ZF_PIN_PROTOCOL_V2_BUILT || pin_protocol != ZF_PIN_PROTOCOL_V2) {
         return false;
     }
 
@@ -111,7 +117,8 @@ bool zf_pin_protocol_decrypt(uint64_t pin_protocol, uint8_t keys[ZF_PIN_PROTOCOL
         *plaintext_len = ciphertext_len;
         return true;
     }
-    if (pin_protocol != ZF_PIN_PROTOCOL_V2 || ciphertext_len <= ZF_PIN_PROTOCOL2_IV_LEN ||
+    if (!ZF_PIN_PROTOCOL_V2_BUILT || pin_protocol != ZF_PIN_PROTOCOL_V2 ||
+        ciphertext_len <= ZF_PIN_PROTOCOL2_IV_LEN ||
         ((ciphertext_len - ZF_PIN_PROTOCOL2_IV_LEN) % 16U) != 0U) {
         return false;
     }
@@ -144,7 +151,7 @@ bool zf_pin_protocol_encrypt(uint64_t pin_protocol, uint8_t keys[ZF_PIN_PROTOCOL
         *out_len = plaintext_len;
         return true;
     }
-    if (pin_protocol != ZF_PIN_PROTOCOL_V2 ||
+    if (!ZF_PIN_PROTOCOL_V2_BUILT || pin_protocol != ZF_PIN_PROTOCOL_V2 ||
         out_capacity < ZF_PIN_PROTOCOL2_IV_LEN + plaintext_len) {
         return false;
     }

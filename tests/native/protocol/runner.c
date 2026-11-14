@@ -6,7 +6,10 @@
 #include <string.h>
 
 #define ZF_AUTO_ACCEPT_REQUESTS 1
+/* The suite exercises the dev-only CTAP 2.1 paths; -DZF_DEV_FIDO2_1=0 runs the release checks. */
+#ifndef ZF_DEV_FIDO2_1
 #define ZF_DEV_FIDO2_1 1
+#endif
 #ifndef ZF_PACKED_ATTESTATION
 #define ZF_PACKED_ATTESTATION 1
 #endif
@@ -119,9 +122,6 @@ static bool g_thread_alloc_fail = false;
 static size_t g_thread_start_count = 0;
 static size_t g_thread_join_count = 0;
 static size_t g_thread_free_count = 0;
-static bool g_u2f_adapter_init_ok = true;
-static size_t g_u2f_adapter_init_count = 0;
-static size_t g_u2f_adapter_deinit_count = 0;
 static size_t g_storage_file_alloc_index = 0;
 static size_t g_storage_counter_rename_count = 0;
 static bool g_storage_root_exists = true;
@@ -267,9 +267,6 @@ static void test_storage_reset(void) {
     g_thread_start_count = 0;
     g_thread_join_count = 0;
     g_thread_free_count = 0;
-    g_u2f_adapter_init_ok = true;
-    g_u2f_adapter_init_count = 0;
-    g_u2f_adapter_deinit_count = 0;
     g_storage_file_alloc_index = 0;
     g_storage_counter_rename_count = 0;
     g_storage_root_exists = true;
@@ -1189,10 +1186,8 @@ void furi_thread_free(FuriThread *thread) {
     }
 }
 
-bool zerofido_ui_request_approval(ZerofidoApp *app, ZfUiProtocol protocol, const char *operation,
-                                  const char *target_id, const char *user_text,
-                                  uint32_t current_cid, bool *approved) {
-    UNUSED(protocol);
+bool zerofido_ui_request_approval(ZerofidoApp *app, const char *operation, const char *target_id,
+                                  const char *user_text, uint32_t current_cid, bool *approved) {
     UNUSED(operation);
     UNUSED(target_id);
     UNUSED(user_text);
@@ -1320,26 +1315,6 @@ void zerofido_notify_deinit(ZerofidoApp *app) {
     UNUSED(app);
 }
 
-bool u2f_data_wipe(Storage *storage) {
-    UNUSED(storage);
-    return true;
-}
-
-bool zf_u2f_adapter_init(ZerofidoApp *app) {
-    UNUSED(app);
-    g_u2f_adapter_init_count++;
-    return g_u2f_adapter_init_ok;
-}
-
-void zf_u2f_adapter_deinit(ZerofidoApp *app) {
-    UNUSED(app);
-    g_u2f_adapter_deinit_count++;
-}
-
-bool zf_u2f_adapter_is_available(const ZerofidoApp *app) {
-    return app && g_u2f_adapter_init_ok;
-}
-
 #include "../../../src/zerofido_cbor.c"
 #include "../../../src/ctap/parse/shared.c"
 #include "../../../src/ctap/parse/get_assertion.c"
@@ -1445,8 +1420,15 @@ static bool test_zf_record_decode(const uint8_t *data, size_t data_size, const c
 #include "subsystems/pin/client_pin_tests.inc"
 #include "subsystems/ctap/command_tests.inc"
 #include "subsystems/store/atomic_counter_tests.inc"
+#include "subsystems/ctap/release_tests.inc"
 
 int main(void) {
+    test_ctap1_apdu_in_ctap2_dispatch_is_invalid_command();
+#if !ZF_DEV_FIDO2_1
+    test_release_build_compiles_out_ctap21();
+    puts("native protocol release-build regressions passed");
+    return 0;
+#endif
     test_command_scratch_is_allocated_lifetime_and_single_owner();
     test_record_decode_rejects_partial_record();
     test_record_decode_accepts_complete_record();
@@ -1513,8 +1495,6 @@ int main(void) {
     test_pin_init_rejects_unsupported_current_format_version();
     test_pin_init_rejects_tampered_retry_state();
     test_pin_auth_blocks_after_three_mismatches();
-    test_ui_format_approval_header_prefixes_protocol();
-    test_ui_format_approval_body_uses_protocol_specific_target_label();
     test_ui_format_fido2_credential_label_uses_passkey_text();
     test_ui_format_fido2_credential_detail_uses_user_facing_text();
     test_ui_hex_encode_truncated_limits_output();
@@ -1588,17 +1568,17 @@ int main(void) {
     test_make_credential_2_1_make_cred_uv_not_required_rejects_resident_without_pin_auth();
     test_make_credential_auto_accept_bypasses_approval_prompt();
     test_make_credential_unknown_option_succeeds();
-    #if ZF_PACKED_ATTESTATION
+#if ZF_PACKED_ATTESTATION
     test_make_credential_returns_packed_attestation();
-    #else
+#else
     test_make_credential_packed_off_returns_none_attestation();
-    #endif
+#endif
     test_make_credential_runtime_none_returns_none_attestation();
     test_make_credential_attestation_preference_overrides_runtime_default();
-    #if ZF_PACKED_ATTESTATION
+#if ZF_PACKED_ATTESTATION
     test_make_credential_attestation_preference_uses_lowest_supported_index();
     test_make_credential_response_does_not_downgrade_required_packed();
-    #endif
+#endif
     test_make_credential_nfc_auto_accept_keeps_uv_clear();
     test_make_credential_nfc_auto_accept_rejects_uv_option_without_pin();
     test_get_assertion_pin_auth_takes_precedence_over_uv();
@@ -1643,11 +1623,10 @@ int main(void) {
     test_get_info_ble_advertises_ble_transport();
     test_runtime_ble_capabilities_follow_build_flag();
     test_get_info_experimental_2_1_advertises_pin_uv_auth_token();
-    test_get_info_advertises_u2f();
+    test_get_info_advertises_fido2_only();
     test_get_info_reports_firmware_version();
     test_ctap_reset_succeeds_and_wipes_runtime_state();
     test_ctap_reset_auto_accept_bypasses_approval_prompt();
-    test_ctap_reset_succeeds_when_u2f_reinit_fails();
     test_ctap_reset_rejects_trailing_payload();
     test_client_pin_get_key_agreement_updates_status_banner();
     test_selection_touch_succeeds_and_updates_status_banner();

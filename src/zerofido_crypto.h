@@ -26,7 +26,7 @@
 #include "zerofido_types.h"
 
 /*
- * Crypto helpers wrap the small subset of primitives used by CTAP, U2F, store,
+ * Crypto helpers wrap the small subset of primitives used by CTAP, store,
  * and PIN. They return false on invalid inputs or backend failures and wipe
  * transient secret buffers before returning.
  */
@@ -79,7 +79,7 @@ bool zf_crypto_compute_public_key_from_private(const uint8_t private_key[ZF_PRIV
                                                uint8_t public_x[ZF_PUBLIC_KEY_LEN],
                                                uint8_t public_y[ZF_PUBLIC_KEY_LEN]);
 /*
- * Signature helpers use DER-encoded ECDSA signatures because CTAP and U2F
+ * Signature helpers use DER-encoded ECDSA signatures because CTAP
  * response encoders both publish ASN.1 DER, not raw r||s values.
  */
 bool zf_crypto_sign_hash_with_private_key(const uint8_t private_key[ZF_PRIVATE_KEY_LEN],

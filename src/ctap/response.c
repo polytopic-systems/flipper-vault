@@ -190,7 +190,7 @@ uint8_t zf_ctap_build_get_info_response(const ZfResolvedCapabilities *capabiliti
         return ZF_CTAP_ERR_OTHER;
     }
 
-    include_ctap21_info_fields = capabilities->advertise_fido_2_1;
+    include_ctap21_info_fields = ZF_CAP_FIDO21(capabilities->advertise_fido_2_1);
     /*
      * Keep CTAP 2.0 NFC GetInfo compact enough for conservative ISO-DEP single
      * frame replies. Full CTAP 2.1 profiles still advertise algorithms.
@@ -212,16 +212,13 @@ uint8_t zf_ctap_build_get_info_response(const ZfResolvedCapabilities *capabiliti
     if (include_ctap21_info_fields) {
         get_info_pairs += 2;
     }
-    if (capabilities->advertise_fido_2_1) {
+    if (ZF_CAP_FIDO21(capabilities->advertise_fido_2_1)) {
         versions_count++;
     }
-    if (capabilities->advertise_u2f_v2) {
-        versions_count++;
-    }
-    if (capabilities->pin_uv_auth_token_enabled) {
+    if (ZF_CAP_FIDO21(capabilities->pin_uv_auth_token_enabled)) {
         options_count++;
     }
-    if (capabilities->make_cred_uv_not_required) {
+    if (ZF_CAP_FIDO21(capabilities->make_cred_uv_not_required)) {
         options_count++;
     }
 #if !defined(ZF_NFC_ONLY) && !defined(ZF_USB_ONLY)
@@ -239,25 +236,27 @@ uint8_t zf_ctap_build_get_info_response(const ZfResolvedCapabilities *capabiliti
     bool ok =
         zf_cbor_encode_map(&enc, get_info_pairs) && zf_cbor_encode_uint(&enc, 1) &&
         zf_cbor_encode_array(&enc, versions_count) &&
-        (!capabilities->advertise_fido_2_1 || zf_cbor_encode_text(&enc, "FIDO_2_1")) &&
-        zf_cbor_encode_text(&enc, "FIDO_2_0") &&
-        (!capabilities->advertise_u2f_v2 || zf_cbor_encode_text(&enc, "U2F_V2")) &&
-        zf_cbor_encode_uint(&enc, 2) && zf_cbor_encode_array(&enc, 2) &&
-        zf_cbor_encode_text(&enc, "credProtect") && zf_cbor_encode_text(&enc, "hmac-secret") &&
-        zf_cbor_encode_uint(&enc, 3) && zf_cbor_encode_bytes(&enc, aaguid, ZF_AAGUID_LEN) &&
-        zf_cbor_encode_uint(&enc, 4) && zf_cbor_encode_map(&enc, options_count) &&
-        zf_cbor_encode_text(&enc, "rk") && zf_cbor_encode_bool(&enc, true) &&
-        zf_cbor_encode_text(&enc, "up") && zf_cbor_encode_bool(&enc, true) &&
-        zf_cbor_encode_text(&enc, "plat") && zf_cbor_encode_bool(&enc, false) &&
-        zf_cbor_encode_text(&enc, "clientPin") && zf_cbor_encode_bool(&enc, client_pin_set) &&
-        (!capabilities->pin_uv_auth_token_enabled ||
+        (!ZF_CAP_FIDO21(capabilities->advertise_fido_2_1) ||
+         zf_cbor_encode_text(&enc, "FIDO_2_1")) &&
+        zf_cbor_encode_text(&enc, "FIDO_2_0") && zf_cbor_encode_uint(&enc, 2) &&
+        zf_cbor_encode_array(&enc, 2) && zf_cbor_encode_text(&enc, "credProtect") &&
+        zf_cbor_encode_text(&enc, "hmac-secret") && zf_cbor_encode_uint(&enc, 3) &&
+        zf_cbor_encode_bytes(&enc, aaguid, ZF_AAGUID_LEN) && zf_cbor_encode_uint(&enc, 4) &&
+        zf_cbor_encode_map(&enc, options_count) && zf_cbor_encode_text(&enc, "rk") &&
+        zf_cbor_encode_bool(&enc, true) && zf_cbor_encode_text(&enc, "up") &&
+        zf_cbor_encode_bool(&enc, true) && zf_cbor_encode_text(&enc, "plat") &&
+        zf_cbor_encode_bool(&enc, false) && zf_cbor_encode_text(&enc, "clientPin") &&
+        zf_cbor_encode_bool(&enc, client_pin_set) &&
+        (!ZF_CAP_FIDO21(capabilities->pin_uv_auth_token_enabled) ||
          (zf_cbor_encode_text(&enc, "pinUvAuthToken") && zf_cbor_encode_bool(&enc, true))) &&
-        (!capabilities->make_cred_uv_not_required ||
+        (!ZF_CAP_FIDO21(capabilities->make_cred_uv_not_required) ||
          (zf_cbor_encode_text(&enc, "makeCredUvNotRqd") && zf_cbor_encode_bool(&enc, true))) &&
         zf_cbor_encode_uint(&enc, 5) && zf_cbor_encode_uint(&enc, ZF_MAX_MSG_SIZE) &&
         zf_cbor_encode_uint(&enc, 6) &&
-        zf_cbor_encode_array(&enc, capabilities->pin_uv_auth_protocol_2_enabled ? 2 : 1) &&
-        (!capabilities->pin_uv_auth_protocol_2_enabled || zf_cbor_encode_uint(&enc, 2)) &&
+        zf_cbor_encode_array(&enc,
+                             ZF_CAP_FIDO21(capabilities->pin_uv_auth_protocol_2_enabled) ? 2 : 1) &&
+        (!ZF_CAP_FIDO21(capabilities->pin_uv_auth_protocol_2_enabled) ||
+         zf_cbor_encode_uint(&enc, 2)) &&
         zf_cbor_encode_uint(&enc, 1);
 
 #if defined(ZF_NFC_ONLY)

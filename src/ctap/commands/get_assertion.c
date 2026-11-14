@@ -306,16 +306,16 @@ uint8_t zf_ctap_handle_get_assertion(ZerofidoApp *app, ZfTransportSessionId sess
         goto cleanup;
     }
     ZF_CTAP_GA_DIAG("parsed");
-    status = zf_ctap_validate_pin_auth_protocol(request->has_pin_auth, request->has_pin_protocol,
-                                                request->pin_protocol,
-                                                app->capabilities.pin_uv_auth_protocol_2_enabled);
+    status = zf_ctap_validate_pin_auth_protocol(
+        request->has_pin_auth, request->has_pin_protocol, request->pin_protocol,
+        ZF_CAP_FIDO21(app->capabilities.pin_uv_auth_protocol_2_enabled));
     if (status != ZF_CTAP_SUCCESS) {
         goto cleanup;
     }
     if (request->assertion.has_hmac_secret &&
         (!zf_pin_protocol_supported(request->assertion.hmac_secret_pin_protocol) ||
          (request->assertion.hmac_secret_pin_protocol == ZF_PIN_PROTOCOL_V2 &&
-          !app->capabilities.pin_uv_auth_protocol_2_enabled))) {
+          !ZF_CAP_FIDO21(app->capabilities.pin_uv_auth_protocol_2_enabled)))) {
         status = ZF_CTAP_ERR_INVALID_PARAMETER;
         goto cleanup;
     }
@@ -328,7 +328,7 @@ uint8_t zf_ctap_handle_get_assertion(ZerofidoApp *app, ZfTransportSessionId sess
     zf_ctap_assertion_queue_clear(app);
     furi_mutex_release(app->ui_mutex);
     if (request->has_pin_auth && request->pin_auth_len == 0) {
-        status = zf_ctap_handle_empty_pin_auth_probe(app, session_id, "Authenticate",
+        status = zf_ctap_handle_empty_pin_auth_probe(app, session_id, "Use passkey",
                                                      request->assertion.rp_id, "Touch required");
         goto cleanup;
     }
@@ -379,12 +379,12 @@ uint8_t zf_ctap_handle_get_assertion(ZerofidoApp *app, ZfTransportSessionId sess
         }
         status = zf_ctap_finish_assertion(app, session_id, request, scratch, false,
                                           selected_record_index, true, uv_verified, uv_verified,
-                                          app->capabilities.advertise_fido_2_1, true,
+                                          ZF_CAP_FIDO21(app->capabilities.advertise_fido_2_1), true,
                                           &maintenance_acquired, out, out_capacity, out_len);
         goto cleanup;
     }
 
-    status = zf_ctap_request_approval(app, "Authenticate", request->assertion.rp_id,
+    status = zf_ctap_request_approval(app, "Use passkey", request->assertion.rp_id,
                                       "Touch required", session_id);
     if (status != ZF_CTAP_SUCCESS) {
         goto cleanup;

@@ -26,7 +26,7 @@
 #include "record_format.h"
 #include "recovery.h"
 
-/* Creates the shared application data directories used by store, PIN, and U2F. */
+/* Creates the shared application data directories used by store and PIN. */
 bool zf_store_bootstrap_ensure_app_data_dir(Storage *storage) {
     return zf_storage_ensure_app_data_dir(storage);
 }
@@ -121,8 +121,8 @@ static bool zf_store_bootstrap_wipe_visitor(const char *name, const FileInfo *in
 }
 
 /*
- * Startup reset removes every credential-like file plus PIN state. U2F files
- * live under their own subtree and are managed by the U2F persistence layer.
+ * Startup reset removes every credential-like file plus PIN state. Files left in
+ * the u2f/ subtree by the removed legacy U2F (CTAP1) support are unused and ignored.
  */
 bool zf_store_bootstrap_wipe_app_data(Storage *storage) {
     char name[96];

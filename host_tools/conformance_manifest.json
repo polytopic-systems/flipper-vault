@@ -9,7 +9,7 @@
   "rows": [
     {
       "id": "transport.init",
-      "section": "CTAPHID and U2F transport",
+      "section": "CTAPHID transport",
       "surface": "CTAPHID_INIT",
       "required": true,
       "classification": "aligned",
@@ -17,7 +17,7 @@
     },
     {
       "id": "transport.ping",
-      "section": "CTAPHID and U2F transport",
+      "section": "CTAPHID transport",
       "surface": "CTAPHID_PING",
       "required": true,
       "classification": "aligned",
@@ -25,7 +25,7 @@
     },
     {
       "id": "transport.cbor",
-      "section": "CTAPHID and U2F transport",
+      "section": "CTAPHID transport",
       "surface": "CTAPHID_CBOR",
       "required": true,
       "classification": "aligned",
@@ -33,15 +33,15 @@
     },
     {
       "id": "transport.msg",
-      "section": "CTAPHID and U2F transport",
-      "surface": "CTAPHID_MSG",
+      "section": "CTAPHID transport",
+      "surface": "CTAPHID_MSG rejected (CTAP1/U2F not supported, CAPABILITY_NMSG)",
       "required": true,
       "classification": "aligned",
-      "scenario_ids": ["u2f_version", "u2f_register", "u2f_authenticate"]
+      "scenario_ids": ["ctap1_rejected"]
     },
     {
       "id": "transport.wink",
-      "section": "CTAPHID and U2F transport",
+      "section": "CTAPHID transport",
       "surface": "CTAPHID_WINK",
       "required": true,
       "classification": "aligned",
@@ -49,7 +49,7 @@
     },
     {
       "id": "transport.cancel",
-      "section": "CTAPHID and U2F transport",
+      "section": "CTAPHID transport",
       "surface": "CTAPHID_CANCEL",
       "required": true,
       "classification": "aligned",
@@ -57,7 +57,7 @@
     },
     {
       "id": "transport.spurious_continuation",
-      "section": "CTAPHID and U2F transport",
+      "section": "CTAPHID transport",
       "surface": "Spurious continuation packet",
       "required": true,
       "classification": "aligned",
@@ -65,19 +65,11 @@
     },
     {
       "id": "transport.capabilities",
-      "section": "CTAPHID and U2F transport",
+      "section": "CTAPHID transport",
       "surface": "Capability bits",
       "required": true,
       "classification": "aligned",
       "scenario_ids": ["transport_init"]
-    },
-    {
-      "id": "transport.u2f_apdu_validation",
-      "section": "CTAPHID and U2F transport",
-      "surface": "U2F APDU validation",
-      "required": true,
-      "classification": "aligned",
-      "scenario_ids": ["u2f_invalid_apdu"]
     },
     {
       "id": "ctap.get_info",

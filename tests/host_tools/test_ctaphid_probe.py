@@ -122,48 +122,15 @@ class CtaphidProbeTests(unittest.TestCase):
         self.assertEqual(frames[1][4], 0)
 
     def test_build_u2f_version_apdu(self) -> None:
+        # Only used to probe that CTAPHID_MSG (CTAP1/U2F) is rejected.
         self.assertEqual(
             ctaphid_probe.build_u2f_version_apdu(),
             bytes([0x00, ctaphid_probe.U2F_VERSION, 0x00, 0x00, 0x00, 0x00, 0x00]),
         )
 
-    def test_build_u2f_invalid_cla_version_apdu(self) -> None:
-        self.assertEqual(
-            ctaphid_probe.build_u2f_invalid_cla_version_apdu(),
-            bytes([0x6D, ctaphid_probe.U2F_VERSION, 0x00, 0x00, 0x00, 0x00, 0x00]),
-        )
-        self.assertEqual(
-            ctaphid_probe.build_u2f_invalid_cla_version_apdu(0xC3),
-            bytes([0xC3, ctaphid_probe.U2F_VERSION, 0x00, 0x00, 0x00, 0x00, 0x00]),
-        )
-
-    def test_build_u2f_version_with_data_apdu(self) -> None:
-        self.assertEqual(
-            ctaphid_probe.build_u2f_version_with_data_apdu(b"\x12\x34"),
-            bytes([0x00, ctaphid_probe.U2F_VERSION, 0x00, 0x00, 0x00, 0x00, 0x02, 0x12, 0x34]),
-        )
-
-    def test_decode_u2f_response_payload_exposes_status_word_metadata(self) -> None:
-        parsed = ctaphid_probe.decode_u2f_response_payload(b"U2F_V2\x90\x00")
-
-        self.assertEqual(parsed["payload_hex"], b"U2F_V2".hex())
-        self.assertEqual(parsed["status_words_hex"], "9000")
-        self.assertEqual(parsed["status_word"], 0x9000)
-        self.assertEqual(parsed["status_word_name"], "SW_NO_ERROR")
-
-    def test_decode_u2f_response_payload_handles_status_only_errors(self) -> None:
-        parsed = ctaphid_probe.decode_u2f_response_payload(bytes.fromhex("6e00"))
-
-        self.assertEqual(parsed["payload_hex"], "")
-        self.assertEqual(parsed["status_words_hex"], "6e00")
-        self.assertEqual(parsed["status_word"], 0x6E00)
-        self.assertEqual(parsed["status_word_name"], "SW_CLA_NOT_SUPPORTED")
-
-    def test_decode_u2f_response_payload_names_wrong_data(self) -> None:
-        parsed = ctaphid_probe.decode_u2f_response_payload(bytes.fromhex("6a80"))
-
-        self.assertEqual(parsed["status_word"], 0x6A80)
-        self.assertEqual(parsed["status_word_name"], "SW_WRONG_DATA")
+    def test_ctap1_rejection_constants_match_ctaphid_spec(self) -> None:
+        self.assertEqual(ctaphid_probe.ERR_INVALID_CMD, 0x01)
+        self.assertEqual(ctaphid_probe.CAPABILITY_NMSG, 0x08)
 
     def test_extract_make_credential_attestation_certificate_reads_x5c_leaf(self) -> None:
         cert_der = bytes.fromhex("3003020101")
@@ -183,43 +150,6 @@ class CtaphidProbeTests(unittest.TestCase):
             ctaphid_probe.extract_make_credential_attestation_certificate(response_payload),
             cert_der,
         )
-
-    def test_build_u2f_authenticate_apdu_sets_length(self) -> None:
-        challenge = bytes(range(32))
-        app_id = bytes(range(32, 64))
-        key_handle = bytes(range(65))
-
-        payload = ctaphid_probe.build_u2f_authenticate_apdu(challenge, app_id, key_handle)
-
-        self.assertEqual(payload[1], ctaphid_probe.U2F_AUTHENTICATE)
-        self.assertEqual(payload[2], ctaphid_probe.U2F_AUTH_ENFORCE)
-        self.assertEqual(payload[4:7], bytes([0x00, 0x00, 0x82]))
-        self.assertEqual(payload[7:39], challenge)
-        self.assertEqual(payload[39:71], app_id)
-        self.assertEqual(payload[71], len(key_handle))
-
-    def test_build_u2f_authenticate_apdu_supports_dont_enforce_mode(self) -> None:
-        challenge = bytes(range(32))
-        app_id = bytes(range(32, 64))
-        key_handle = bytes(range(65))
-
-        payload = ctaphid_probe.build_u2f_authenticate_apdu(
-            challenge, app_id, key_handle, mode=ctaphid_probe.U2F_AUTH_DONT_ENFORCE
-        )
-
-        self.assertEqual(payload[2], ctaphid_probe.U2F_AUTH_DONT_ENFORCE)
-
-    def test_build_u2f_register_apdu_sets_expected_length(self) -> None:
-        challenge = bytes(range(32))
-        app_id = bytes(range(32, 64))
-
-        payload = ctaphid_probe.build_u2f_register_apdu(challenge, app_id)
-
-        self.assertEqual(len(payload), 71)
-        self.assertEqual(payload[1], ctaphid_probe.U2F_REGISTER)
-        self.assertEqual(payload[4:7], bytes([0x00, 0x00, 0x40]))
-        self.assertEqual(payload[7:39], challenge)
-        self.assertEqual(payload[39:71], app_id)
 
     def test_pin_hash16_matches_expected_length(self) -> None:
         self.assertEqual(len(ctaphid_probe.pin_hash16("2468")), 16)

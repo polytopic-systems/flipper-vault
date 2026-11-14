@@ -26,7 +26,6 @@
 #include <string.h>
 
 #include "usb_hid_session.h"
-#include "../u2f/adapter.h"
 #include "../zerofido_app_i.h"
 #include "../zerofido_crypto.h"
 #include "../zerofido_notify.h"
@@ -101,7 +100,8 @@ static void zf_transport_event_callback(HidU2fEvent ev, void *context) {
     }
 }
 
-/* Claims the U2F HID USB interface while remembering what to restore on exit. */
+/* Claims the FIDO HID USB interface (the firmware calls it usb_hid_u2f) while remembering what to
+ * restore on exit. */
 static bool zf_transport_enable_usb(ZerofidoApp *app) {
     FuriHalUsbInterface *current_usb = NULL;
 
@@ -176,7 +176,6 @@ static void zf_transport_worker_on_connect(ZerofidoApp *app, ZfTransportState *t
 
     zf_transport_session_reset(transport);
     zf_transport_session_expire_lock(transport);
-    zf_u2f_adapter_set_connected(app, true);
     zerofido_ui_set_transport_connected(app, true);
 }
 
@@ -185,7 +184,6 @@ static void zf_transport_worker_on_disconnect(ZerofidoApp *app, ZfTransportState
 
     zf_transport_session_reset(transport);
     zf_transport_session_expire_lock(transport);
-    zf_u2f_adapter_set_connected(app, false);
     zerofido_ui_set_transport_connected(app, false);
     zerofido_notify_reset(app);
     zf_transport_worker_hide_interaction_if_needed(app, canceled);
@@ -294,9 +292,6 @@ void zf_transport_usb_hid_send_dispatch_result(ZerofidoApp *app,
     switch (request->protocol) {
     case ZfTransportProtocolKindPing:
         response_command = ZF_CTAPHID_PING;
-        break;
-    case ZfTransportProtocolKindU2f:
-        response_command = ZF_CTAPHID_MSG;
         break;
     case ZfTransportProtocolKindCtap2:
         response_command = ZF_CTAPHID_CBOR;

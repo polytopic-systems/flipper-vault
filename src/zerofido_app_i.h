@@ -32,7 +32,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "u2f/session.h"
 #include "transport/adapter.h"
 #ifndef ZF_USB_ONLY
 #include "transport/nfc_worker.h"
@@ -115,7 +114,6 @@ typedef struct {
  * wiped on release to keep protocol stacks small.
  */
 typedef struct {
-    ZfUiProtocol protocol;
     char operation[24];
     char user_text[ZF_MAX_USER_NAME_LEN + ZF_MAX_DISPLAY_NAME_LEN + 8];
 } ZfApprovalPrompt;
@@ -173,7 +171,6 @@ typedef struct ZerofidoApp {
 #elif !defined(ZF_USB_ONLY)
     ZfNfcTransportState *transport_nfc_state_storage;
 #endif
-    U2fData *u2f;
     ZfClientPinState pin_state;
     ZfRuntimeConfig runtime_config;
     ZfResolvedCapabilities capabilities;
@@ -247,8 +244,24 @@ static inline void zf_app_set_nfc_transport_state(ZerofidoApp *app, ZfNfcTranspo
 }
 #endif
 
+/*
+ * Arena/scratch helpers. Firmware builds keep one out-of-line copy (defined in
+ * zerofido_app.c) instead of inlining them at every call site; host tests compile
+ * single translation units and keep them inline.
+ */
+#if defined(ZF_HOST_TEST)
+#define ZF_APP_HELPER static inline
+#define ZF_APP_HELPER_BODY 1
+#elif defined(ZF_APP_HELPERS_IMPL)
+#define ZF_APP_HELPER
+#define ZF_APP_HELPER_BODY 1
+#else
+#define ZF_APP_HELPER_BODY 0
+#endif
+
+#if ZF_APP_HELPER_BODY
 /* Transport scratch is allocated only while a transport worker/session needs it. */
-static inline bool zf_app_transport_arena_acquire(ZerofidoApp *app) {
+ZF_APP_HELPER bool zf_app_transport_arena_acquire(ZerofidoApp *app) {
     if (!app) {
         return false;
     }
@@ -268,11 +281,11 @@ static inline bool zf_app_transport_arena_acquire(ZerofidoApp *app) {
     return true;
 }
 
-static inline size_t zf_app_transport_arena_capacity(const ZerofidoApp *app) {
+ZF_APP_HELPER size_t zf_app_transport_arena_capacity(const ZerofidoApp *app) {
     return app && app->transport_arena ? app->transport_arena_size : 0U;
 }
 
-static inline void zf_app_transport_arena_wipe(ZerofidoApp *app) {
+ZF_APP_HELPER void zf_app_transport_arena_wipe(ZerofidoApp *app) {
     if (!app || !app->transport_arena) {
         return;
     }
@@ -283,7 +296,7 @@ static inline void zf_app_transport_arena_wipe(ZerofidoApp *app) {
     }
 }
 
-static inline void zf_app_transport_arena_release(ZerofidoApp *app) {
+ZF_APP_HELPER void zf_app_transport_arena_release(ZerofidoApp *app) {
     if (!app || !app->transport_arena) {
         return;
     }
@@ -295,7 +308,7 @@ static inline void zf_app_transport_arena_release(ZerofidoApp *app) {
 }
 
 /* Command scratch is single-owner per operation and allocated only while active. */
-static inline void *zf_app_command_scratch_acquire(ZerofidoApp *app, size_t size) {
+ZF_APP_HELPER void *zf_app_command_scratch_acquire(ZerofidoApp *app, size_t size) {
     if (!app || size > ZF_COMMAND_SCRATCH_SIZE || app->command_scratch_in_use ||
         app->command_scratch) {
         return NULL;
@@ -314,7 +327,7 @@ static inline void *zf_app_command_scratch_acquire(ZerofidoApp *app, size_t size
     return app->command_scratch->bytes;
 }
 
-static inline void zf_app_command_scratch_release(ZerofidoApp *app) {
+ZF_APP_HELPER void zf_app_command_scratch_release(ZerofidoApp *app) {
     if (!app || !app->command_scratch) {
         return;
     }
@@ -329,7 +342,7 @@ static inline void zf_app_command_scratch_release(ZerofidoApp *app) {
     app->command_scratch_size = 0;
 }
 
-static inline void zf_app_command_scratch_destroy(ZerofidoApp *app) {
+ZF_APP_HELPER void zf_app_command_scratch_destroy(ZerofidoApp *app) {
     if (!app) {
         return;
     }
@@ -350,7 +363,7 @@ static inline void zf_app_command_scratch_destroy(ZerofidoApp *app) {
 }
 
 /* UI scratch is separate from command scratch because view callbacks run on the UI thread. */
-static inline void *zf_app_ui_scratch_acquire(ZerofidoApp *app, size_t size) {
+ZF_APP_HELPER void *zf_app_ui_scratch_acquire(ZerofidoApp *app, size_t size) {
     if (!app || size > ZF_UI_SCRATCH_SIZE || app->ui_scratch) {
         return NULL;
     }
@@ -365,7 +378,7 @@ static inline void *zf_app_ui_scratch_acquire(ZerofidoApp *app, size_t size) {
     return app->ui_scratch->bytes;
 }
 
-static inline void zf_app_ui_scratch_release(ZerofidoApp *app) {
+ZF_APP_HELPER void zf_app_ui_scratch_release(ZerofidoApp *app) {
     if (!app || !app->ui_scratch) {
         return;
     }
@@ -377,3 +390,14 @@ static inline void zf_app_ui_scratch_release(ZerofidoApp *app) {
     free(app->ui_scratch);
     app->ui_scratch = NULL;
 }
+#else
+bool zf_app_transport_arena_acquire(ZerofidoApp *app);
+size_t zf_app_transport_arena_capacity(const ZerofidoApp *app);
+void zf_app_transport_arena_wipe(ZerofidoApp *app);
+void zf_app_transport_arena_release(ZerofidoApp *app);
+void *zf_app_command_scratch_acquire(ZerofidoApp *app, size_t size);
+void zf_app_command_scratch_release(ZerofidoApp *app);
+void zf_app_command_scratch_destroy(ZerofidoApp *app);
+void *zf_app_ui_scratch_acquire(ZerofidoApp *app, size_t size);
+void zf_app_ui_scratch_release(ZerofidoApp *app);
+#endif

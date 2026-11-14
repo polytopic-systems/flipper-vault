@@ -80,20 +80,23 @@ void scene_transport_ambient(Canvas *canvas, int32_t x, int32_t y, VaultTranspor
         }
         return;
     }
-    /* NFC: field arcs roll out from a card. BLE: rings radiate from the rune. */
+    /*
+     * NFC: field arcs step out from a card. BLE: rings step out from the rune.
+     * While active the arcs light one by one (160 ms steps); idle shows them all.
+     */
     bool nfc = art == VaultTransportNfc;
     int32_t cx = nfc ? x + 6 : x + 13;
     int32_t cy = y + 8;
-    for (int32_t k = 0; k < 3; ++k) {
-        int32_t phase = active ? (int32_t)((now / 32U + (uint32_t)k * 16U) % 48U) : 8 + k * 14;
-        int32_t r = 4 + phase / 4;
-        int32_t level = active ? 16 - phase / 3 : 12;
-        for (int32_t a = nfc ? -24 : 0; a < (nfc ? 26 : 256); a += nfc ? 3 : 8) {
-            int32_t px, py;
-            vg_polar(cx, cy, r * 16, nfc ? 64 + a : a, &px, &py);
-            if (py >= y && py <= y + 15 && (level >= 15 || vg_bayer(px, py, level))) {
-                vg_px(canvas, px, py, true);
-            }
+    int32_t lit = active ? 1 + (int32_t)((now / 160U) % 3U) : 3;
+    for (int32_t k = 0; k < lit; ++k) {
+        if (nfc) {
+            int32_t ax = x + 9 + k * 3;
+            int32_t h = 3 + k * 2;
+            canvas_draw_line(canvas, ax, cy - h, ax + 1, cy - h + 1);
+            canvas_draw_line(canvas, ax + 1, cy - h + 1, ax + 1, cy + h - 1);
+            canvas_draw_line(canvas, ax + 1, cy + h - 1, ax, cy + h);
+        } else {
+            canvas_draw_circle(canvas, cx, cy, 5 + (k * 3) / 2);
         }
     }
     if (nfc) {

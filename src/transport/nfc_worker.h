@@ -58,7 +58,6 @@ typedef struct {
 
 typedef enum {
     ZfNfcRequestKindNone = 0,
-    ZfNfcRequestKindU2f = 1,
     ZfNfcRequestKindCtap2 = 2,
 } ZfNfcRequestKind;
 
@@ -89,7 +88,6 @@ typedef struct {
     bool processing;
     bool processing_cancel_requested;
     bool response_ready;
-    bool response_is_u2f;
     bool response_is_error;
     bool command_chain_active;
     bool ctap_get_response_supported;

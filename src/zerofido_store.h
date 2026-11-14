@@ -85,7 +85,7 @@ bool zf_store_load_record_by_index_for_rp_with_buffer(Storage *storage,
 
 /*
  * Signature counters are monotonic across power loss. The high-water value is
- * reserved in the record file before the CTAP/U2F response is published, then
+ * reserved in the record file before the CTAP response is published, then
  * mirrored into the index after the response path succeeds.
  */
 bool zf_store_advance_counter(Storage *storage, ZfCredentialStore *store,

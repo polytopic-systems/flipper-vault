@@ -29,7 +29,6 @@
 #include <string.h>
 #include <toolbox/bit_buffer.h>
 
-#include "../u2f/adapter.h"
 #include "../zerofido_app_i.h"
 #include "../zerofido_ctap.h"
 #include "../zerofido_crypto.h"
@@ -142,7 +141,7 @@ static void zf_transport_nfc_response_buffer_free(uint8_t *buffer, size_t capaci
 }
 
 /*
- * Worker-side processing for queued NFC CTAP2/U2F requests. Responses are stored
+ * Worker-side processing for queued NFC CTAP2 requests. Responses are stored
  * only if the generation/session still match, preventing late completions from
  * answering a newer applet selection or exchange.
  */
@@ -181,8 +180,7 @@ static void zf_transport_nfc_process_request(ZerofidoApp *app) {
 
     response = zf_transport_nfc_response_buffer_alloc(&response_capacity);
     if (!response || response_capacity <= 1U) {
-        zf_transport_nfc_store_response(app, state, session_id, request_generation, NULL, 0,
-                                        request_kind == ZfNfcRequestKindU2f, true,
+        zf_transport_nfc_store_response(app, state, session_id, request_generation, NULL, 0, true,
                                         ZF_NFC_SW_INTERNAL_ERROR);
         goto cleanup;
     }
@@ -199,20 +197,13 @@ static void zf_transport_nfc_process_request(ZerofidoApp *app) {
         zf_transport_nfc_trace_event(response_len == 0U ? "CTAP2 worker empty"
                                                         : "CTAP2 worker done");
         zf_transport_nfc_store_response(
-            app, state, session_id, request_generation, response, response_len, false,
-            response_len == 0, response_len == 0 ? ZF_NFC_SW_INTERNAL_ERROR : ZF_NFC_SW_SUCCESS);
-        break;
-    case ZfNfcRequestKindU2f:
-        response_len = zf_u2f_adapter_handle_msg(app, session_id, request_copy, request_len,
-                                                 response, response_capacity);
-        zf_transport_nfc_store_response(
-            app, state, session_id, request_generation, response, response_len, true,
-            response_len == 0, response_len == 0 ? ZF_NFC_SW_INTERNAL_ERROR : ZF_NFC_SW_SUCCESS);
+            app, state, session_id, request_generation, response, response_len, response_len == 0,
+            response_len == 0 ? ZF_NFC_SW_INTERNAL_ERROR : ZF_NFC_SW_SUCCESS);
         break;
     case ZfNfcRequestKindNone:
     default:
-        zf_transport_nfc_store_response(app, state, session_id, request_generation, NULL, 0, false,
-                                        true, ZF_NFC_SW_INTERNAL_ERROR);
+        zf_transport_nfc_store_response(app, state, session_id, request_generation, NULL, 0, true,
+                                        ZF_NFC_SW_INTERNAL_ERROR);
         break;
     }
 cleanup:
@@ -435,7 +426,6 @@ void zf_transport_nfc_send_dispatch_result(ZerofidoApp *app,
 
     zf_transport_nfc_store_response(app, state, request->session_id, state->processing_generation,
                                     result->response, result->response_len,
-                                    request->protocol == ZfTransportProtocolKindU2f,
                                     result->send_transport_error, error_status_word);
 }
 

@@ -36,9 +36,9 @@ void zerofido_ui_refresh_credentials_status(ZerofidoApp *app);
 void zerofido_ui_set_status(ZerofidoApp *app, const char *text);
 void zerofido_ui_set_status_locked(ZerofidoApp *app, const char *text);
 void zerofido_ui_set_transport_connected(ZerofidoApp *app, bool connected);
-bool zerofido_ui_request_approval(ZerofidoApp *app, ZfUiProtocol protocol, const char *operation,
-                                  const char *target_id, const char *user_text,
-                                  ZfTransportSessionId current_session_id, bool *approved);
+bool zerofido_ui_request_approval(ZerofidoApp *app, const char *operation, const char *target_id,
+                                  const char *user_text, ZfTransportSessionId current_session_id,
+                                  bool *approved);
 bool zerofido_ui_request_assertion_selection(ZerofidoApp *app, const char *rp_id,
                                              const uint16_t *match_indices, size_t match_count,
                                              ZfTransportSessionId current_session_id,

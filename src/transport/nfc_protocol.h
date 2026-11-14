@@ -67,17 +67,14 @@ typedef struct {
 
 /*
  * NFC protocol helpers parse ISO7816 APDUs, recognize the FIDO AID, normalize
- * Le values, and adapt U2F APDU payloads into the legacy U2F parser format.
+ * and Le values.
  */
 extern const uint8_t zf_transport_nfc_fido_aid[ZF_NFC_AID_LEN];
 extern const uint8_t zf_transport_nfc_ndef_aid[ZF_NFC_NDEF_AID_LEN];
-extern const uint8_t zf_transport_nfc_select_response[6];
-extern const uint8_t zf_transport_nfc_fido2_select_response[8];
+extern const uint8_t zf_transport_nfc_select_response[8];
 
 size_t zf_transport_nfc_normalize_le(const ZfNfcApdu *apdu);
 bool zf_transport_nfc_is_fido_select_apdu(const ZfNfcApdu *apdu);
 bool zf_transport_nfc_is_ndef_select_apdu(const uint8_t *buffer, size_t buffer_len);
 bool zf_transport_nfc_parse_apdu(const uint8_t *buffer, size_t buffer_len, ZfNfcApdu *apdu);
 uint16_t zf_transport_nfc_status_update_sw(size_t remaining);
-size_t zf_transport_nfc_encode_u2f_request(const ZfNfcApdu *apdu, uint8_t *out,
-                                           size_t out_capacity);

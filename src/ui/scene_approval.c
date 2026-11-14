@@ -44,7 +44,7 @@ static void approval_draw_asking(Canvas *canvas, const VaultApprovalModel *m) {
     char right[16];
     int32_t left_ms = vg_clamp((int32_t)(m->deadline - m->now), 0, APPROVAL_TIMEOUT_MS);
     snprintf(right, sizeof(right), "%lds", (long)((left_ms + 999) / 1000));
-    scene_title_bar(canvas, m->u2f ? VaultIconKey : VaultIconLock, m->header, right);
+    scene_title_bar(canvas, VaultIconLock, m->header, right);
     /* Countdown drains under the title. */
     canvas_draw_line(canvas, 2, 12, 2 + (left_ms * 123) / APPROVAL_TIMEOUT_MS, 12);
     approval_draw_rails(canvas, m);

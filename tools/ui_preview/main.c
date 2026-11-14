@@ -184,13 +184,11 @@ static void scene_approval_stills(void) {
         {"approve_verylong", "Create passkey",
          "secure-authentication.accounts.very-long-relying-party-name.example.com",
          "A very long display name that keeps going and going"},
-        {"approve_u2f", "U2F Authenticate", "https://demo.yubico.com", "Touch required"},
         {"approve_pin", "Authorize", "PIN token", "Approve PIN use"},
         {"approve_stripped", "Use passkey", "xn--bcher-kva.example", "J?rgen M?ller"},
     };
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
         approval_model(&m, cases[i].header, cases[i].site, cases[i].account);
-        m.u2f = i == 4;
         rec_begin(cases[i].name);
         /* First 0.5 s shows the keys arming. */
         for (uint32_t t = 0; t < 4200U; t += FPS_MS) {

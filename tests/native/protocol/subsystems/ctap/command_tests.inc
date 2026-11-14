@@ -624,8 +624,7 @@ static void test_make_credential_pin_auth_clears_permission_scoped_token_after_u
     app.ui_mutex = &ui_mutex;
     app.pin_state.pin_set = true;
     memset(app.pin_state.pin_token, 0x66, sizeof(app.pin_state.pin_token));
-    zf_pin_set_token_permissions(&app.pin_state, ZF_PIN_PERMISSION_MC, true, true,
-                                 "example.com");
+    zf_pin_set_token_permissions(&app.pin_state, ZF_PIN_PERMISSION_MC, true, true, "example.com");
     mark_pin_token_issued(&app.pin_state);
     expect(zf_crypto_hmac_sha256(app.pin_state.pin_token, sizeof(app.pin_state.pin_token),
                                  client_data_hash, sizeof(client_data_hash), pin_auth),
@@ -1152,8 +1151,7 @@ static void test_get_assertion_pin_auth_clears_permission_scoped_token_after_up(
     app.ui_mutex = &ui_mutex;
     app.pin_state.pin_set = true;
     memset(app.pin_state.pin_token, 0x77, sizeof(app.pin_state.pin_token));
-    zf_pin_set_token_permissions(&app.pin_state, ZF_PIN_PERMISSION_GA, true, true,
-                                 "example.com");
+    zf_pin_set_token_permissions(&app.pin_state, ZF_PIN_PERMISSION_GA, true, true, "example.com");
     mark_pin_token_issued(&app.pin_state);
     expect(zf_crypto_hmac_sha256(app.pin_state.pin_token, sizeof(app.pin_state.pin_token),
                                  client_data_hash, sizeof(client_data_hash), pin_auth),
@@ -1211,8 +1209,8 @@ static void test_permission_scoped_pin_token_rejects_browser_style_replay_after_
     app.ui_mutex = &ui_mutex;
     app.pin_state.pin_set = true;
     memset(app.pin_state.pin_token, 0x79, sizeof(app.pin_state.pin_token));
-    zf_pin_set_token_permissions(&app.pin_state, ZF_PIN_PERMISSION_MC | ZF_PIN_PERMISSION_GA,
-                                 true, true, "example.com");
+    zf_pin_set_token_permissions(&app.pin_state, ZF_PIN_PERMISSION_MC | ZF_PIN_PERMISSION_GA, true,
+                                 true, "example.com");
     mark_pin_token_issued(&app.pin_state);
     expect(zf_crypto_hmac_sha256(app.pin_state.pin_token, sizeof(app.pin_state.pin_token),
                                  make_credential_client_data_hash,
@@ -2680,7 +2678,8 @@ static void test_get_info_experimental_2_1_advertises_pin_uv_auth_token(void) {
            "experimental 2.1 GetInfo should advertise firmwareVersion");
 }
 
-static void test_get_info_advertises_u2f(void) {
+/* Legacy U2F (CTAP1) was removed: GetInfo lists FIDO_2_0 and never U2F_V2. */
+static void test_get_info_advertises_fido2_only(void) {
     ZerofidoApp app = {0};
     ZfCredentialIndexEntry app_store_records[ZF_MAX_CREDENTIALS] = {0};
     app.store.records = app_store_records;
@@ -2693,8 +2692,10 @@ static void test_get_info_advertises_u2f(void) {
 
     expect(response_len > 1, "GetInfo should return a CBOR body");
     expect(response[0] == ZF_CTAP_SUCCESS, "GetInfo should succeed");
-    expect(get_info_has_version(response + 1, response_len - 1, "U2F_V2"),
-           "GetInfo should advertise legacy U2F compatibility");
+    expect(get_info_has_version(response + 1, response_len - 1, "FIDO_2_0"),
+           "GetInfo should advertise FIDO_2_0");
+    expect(!get_info_has_version(response + 1, response_len - 1, "U2F_V2"),
+           "GetInfo must not advertise U2F_V2 now that CTAP1 is gone");
 }
 
 static void test_get_info_reports_firmware_version(void) {
@@ -2789,46 +2790,6 @@ static void test_ctap_reset_auto_accept_bypasses_approval_prompt(void) {
     expect(response_len == 1, "auto-accept Reset should return status only");
     expect(response[0] == ZF_CTAP_SUCCESS, "auto-accept Reset should succeed");
     expect(g_approval_request_count == 0, "auto-accept Reset should bypass the approval prompt");
-}
-
-static void test_ctap_reset_succeeds_when_u2f_reinit_fails(void) {
-    ZerofidoApp app = {0};
-    ZfCredentialIndexEntry app_store_records[ZF_MAX_CREDENTIALS] = {0};
-    app.store.records = app_store_records;
-    Storage storage = {0};
-    uint8_t response[128];
-    size_t response_len = 0;
-    ZfCredentialRecord record = {0};
-
-    test_storage_reset();
-    app.storage = &storage;
-    app.ui_mutex = (FuriMutex *)0x1;
-    zf_runtime_config_load_defaults(&app.runtime_config);
-    zf_runtime_config_resolve_capabilities(&app.runtime_config, &app.capabilities);
-    app.capabilities_resolved = true;
-    app.capabilities.u2f_enabled = true;
-    g_u2f_adapter_init_ok = false;
-
-    expect(test_zf_store_init(&storage, &app.store), "init store before U2F-failing reset");
-    expect(zerofido_pin_init(&storage, &app.pin_state), "init PIN state before U2F-failing reset");
-    expect(zerofido_pin_set_plaintext(&storage, &app.pin_state, "1234") == ZF_CTAP_SUCCESS,
-           "set PIN before U2F-failing reset");
-    expect(zf_store_prepare_credential(&record, "example.com", (const uint8_t *)"user-1", 6,
-                                       "alice", "Alice", true),
-           "prepare credential before U2F-failing reset");
-    expect(test_zf_store_add_record(&storage, &app.store, &record),
-           "persist credential before U2F-failing reset");
-
-    response_len = zerofido_handle_ctap2(&app, 0x01020304, (const uint8_t[]){ZfCtapeCmdReset}, 1,
-                                         response, sizeof(response));
-
-    expect(response_len == 1, "Reset with failed U2F reinit should return status only");
-    expect(response[0] == ZF_CTAP_SUCCESS, "Reset should not fail when U2F reinit fails");
-    expect(zf_store_count_saved(&app.store) == 0,
-           "Reset should still wipe stored credentials when U2F reinit fails");
-    expect(!app.pin_state.pin_set, "Reset should still clear PIN when U2F reinit fails");
-    expect(g_u2f_adapter_deinit_count == 1, "Reset should deinit U2F before wiping");
-    expect(g_u2f_adapter_init_count == 1, "Reset should attempt best-effort U2F reinit");
 }
 
 static void test_ctap_reset_rejects_trailing_payload(void) {

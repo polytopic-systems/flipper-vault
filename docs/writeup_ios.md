@@ -18,12 +18,12 @@ Flipper NFC listener
   -> ZeroFIDO ISO-DEP I/R/S block handling
   -> ISO7816 APDU parser
   -> FIDO NFC dispatcher
-  -> CTAP / U2F core
+  -> CTAP2 core
 ```
 
 APDU code returns APDU payloads and status words. ISO-DEP code turns those bytes
 into I-blocks, toggles block numbers, and handles reader ACK/NAK recovery. Do
-not push ISO-DEP repair into CTAP or U2F handlers.
+not push ISO-DEP repair into CTAP handlers.
 
 This is a small card-side ISO-DEP transport for the ZeroFIDO authenticator
 surface, not a general ISO14443-4 stack.
@@ -68,14 +68,11 @@ ZeroFIDO accepts:
 - canonical `Le=0`
 - the legacy nine-byte AID plus trailing zero form
 
-Normal builds answer:
+Vault is FIDO2-only (legacy U2F was removed), so SELECT answers:
 
 ```text
-55 32 46 5F 56 32 90 00    # "U2F_V2" + 9000
+46 49 44 4F 5F 32 5F 30 90 00    # "FIDO_2_0" + 9000
 ```
-
-FIDO2-only builds answer `FIDO_2_0 9000`. A legacy pre-select U2F VERSION APDU
-can also select the FIDO surface and return `U2F_V2 9000`.
 
 Each successful SELECT starts a new logical NFC session and clears pending
 request, response, command-chain, transmit-chain, and replay state.
@@ -112,14 +109,11 @@ stalled fragments, and dispatches CTAP only after the final fragment arrives.
 `80 12 01 00` means NFCCTAP_CONTROL END. ZeroFIDO cancels pending work, clears
 the selected applet, and resets exchange state.
 
-## U2F
+## U2F (CTAP1)
 
-U2F APDUs use `CLA=00` and go through the same U2F adapter as USB HID MSG.
-Validation failures that do not need user presence return from the NFC callback.
-That keeps conformance negative tests out of the approval path.
-
-Large U2F responses use ISO GET RESPONSE paging. U2F keeps its status word at
-the end of the U2F response buffer; CTAP2 uses APDU `9000` for success.
+Not supported. After SELECT, CTAP1 APDUs (`CLA=00`, INS `01`/`02`/`03`) get
+`6D00` (instruction not supported) at once, without queuing work or prompting.
+Before SELECT they get `6985` like any other non-SELECT APDU.
 
 ## Recovery
 
@@ -153,7 +147,7 @@ A Safari registration or assertion follows this shape:
 6. WebKit selects the FIDO applet:
    00 A4 04 00 08 A0 00 00 06 47 2F 00 01
 7. ZeroFIDO returns:
-   U2F_V2 9000
+   FIDO_2_0 9000
 8. WebKit sends CTAP2 getInfo as extended APDU:
    80 10 00 00 00 00 01 04 00 00
 9. ZeroFIDO returns:
@@ -178,7 +172,7 @@ The native transport regression harness covers:
 - FIDO SELECT variants and FIDO2-only SELECT response
 - DESFire native and wrapped probe handling
 - NDEF rejection
-- pre-select rejection and U2F VERSION fallback
+- pre-select rejection and CTAP1 (U2F) APDU rejection
 - WebKit extended CTAP2 getInfo
 - direct no-GET_RESPONSE CTAP2
 - GET_RESPONSE-aware queued CTAP2

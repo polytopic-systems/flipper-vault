@@ -31,8 +31,8 @@
 #include "lib/toolbox/simple_array.h"
 
 /*
- * Host-native transport/U2F regression harness. It stubs USB, NFC, storage, UI,
- * and crypto boundaries so the production transport and U2F modules can be
+ * Host-native transport regression harness. It stubs USB, NFC, storage, UI,
+ * and crypto boundaries so the production transport modules can be
  * tested as compiled C on the workstation.
  */
 
@@ -206,21 +206,6 @@ static size_t g_ctap2_large_response_len = 0U;
 static bool g_get_info_builder_called = false;
 static bool g_get_info_builder_saw_nfc_transport = false;
 static bool g_get_info_builder_saw_usb_transport = false;
-static bool g_u2f_cert_assets_present = true;
-static bool g_u2f_cert_check_result = true;
-static bool g_u2f_cert_key_load_result = true;
-static bool g_u2f_cert_key_matches_result = true;
-static size_t g_u2f_attestation_ensure_call_count = 0;
-static bool g_u2f_attestation_ensure_result = true;
-static bool g_u2f_key_exists_result = true;
-static bool g_u2f_key_load_result = true;
-static size_t g_u2f_key_generate_count = 0;
-static bool g_u2f_cnt_exists_result = true;
-static bool g_u2f_cnt_read_result = true;
-static size_t g_u2f_cnt_write_count = 0;
-static uint32_t g_u2f_last_written_counter = 0;
-static size_t g_u2f_cnt_reserve_count = 0;
-static uint32_t g_u2f_last_reserved_counter = 0;
 static uint8_t g_hid_request_packets[8][64];
 static size_t g_hid_request_packet_lens[8];
 static size_t g_hid_request_count = 0;
@@ -339,21 +324,6 @@ static void test_reset(void) {
     g_get_info_builder_called = false;
     g_get_info_builder_saw_nfc_transport = false;
     g_get_info_builder_saw_usb_transport = false;
-    g_u2f_cert_assets_present = true;
-    g_u2f_cert_check_result = true;
-    g_u2f_cert_key_load_result = true;
-    g_u2f_cert_key_matches_result = true;
-    g_u2f_attestation_ensure_call_count = 0;
-    g_u2f_attestation_ensure_result = true;
-    g_u2f_key_exists_result = true;
-    g_u2f_key_load_result = true;
-    g_u2f_key_generate_count = 0;
-    g_u2f_cnt_exists_result = true;
-    g_u2f_cnt_read_result = true;
-    g_u2f_cnt_write_count = 0;
-    g_u2f_last_written_counter = 0;
-    g_u2f_cnt_reserve_count = 0;
-    g_u2f_last_reserved_counter = 0;
     memset(g_hid_request_packets, 0, sizeof(g_hid_request_packets));
     memset(g_hid_request_packet_lens, 0, sizeof(g_hid_request_packet_lens));
     g_hid_request_count = 0;
@@ -1059,15 +1029,15 @@ bool storage_file_open(File *file, const char *path, FS_AccessMode access_mode,
                        FS_OpenMode open_mode) {
     TestStorageFile *slot = NULL;
 
-    if (strncmp(path, "/ext/apps_data/flipper_vault/", strlen("/ext/apps_data/flipper_vault/")) == 0 &&
+    if (strncmp(path, "/ext/apps_data/flipper_vault/", strlen("/ext/apps_data/flipper_vault/")) ==
+            0 &&
         !g_storage_app_data_exists) {
         return false;
     }
 
-    slot = test_storage_file_slot(path,
-                                  access_mode == FSAM_WRITE &&
-                                      (open_mode == FSOM_CREATE_ALWAYS ||
-                                       open_mode == FSOM_OPEN_APPEND));
+    slot = test_storage_file_slot(
+        path, access_mode == FSAM_WRITE &&
+                  (open_mode == FSOM_CREATE_ALWAYS || open_mode == FSOM_OPEN_APPEND));
     if (!slot) {
         return false;
     }
@@ -1357,10 +1327,8 @@ void zerofido_notify_wink(ZerofidoApp *app) {
     UNUSED(app);
 }
 
-bool zerofido_ui_request_approval(ZerofidoApp *app, ZfUiProtocol protocol, const char *operation,
-                                  const char *rp_id, const char *user_text, uint32_t cid,
-                                  bool *approved) {
-    UNUSED(protocol);
+bool zerofido_ui_request_approval(ZerofidoApp *app, const char *operation, const char *rp_id,
+                                  const char *user_text, uint32_t cid, bool *approved) {
     UNUSED(operation);
     UNUSED(user_text);
     UNUSED(cid);
@@ -1511,93 +1479,6 @@ size_t zerofido_handle_ctap2(ZerofidoApp *app, uint32_t cid, const uint8_t *requ
     }
 
     return 0;
-}
-
-bool u2f_data_check(bool cert_only) {
-    UNUSED(cert_only);
-    return g_u2f_cert_assets_present;
-}
-
-bool u2f_data_cert_check(void) {
-    return g_u2f_cert_assets_present && g_u2f_cert_check_result;
-}
-
-uint32_t u2f_data_cert_load(uint8_t *cert, size_t capacity) {
-    if (capacity > 0) {
-        cert[0] = 0;
-        return 1;
-    }
-
-    return 0;
-}
-
-bool u2f_data_cert_key_load(uint8_t *cert_key) {
-    if (!g_u2f_cert_assets_present || !g_u2f_cert_key_load_result) {
-        memset(cert_key, 0, 32);
-        return false;
-    }
-    memset(cert_key, 0, 32);
-    return true;
-}
-
-bool u2f_data_cert_key_matches(const uint8_t *cert_key) {
-    UNUSED(cert_key);
-    return g_u2f_cert_key_matches_result;
-}
-
-bool u2f_data_ensure_local_attestation_assets(void) {
-    g_u2f_attestation_ensure_call_count++;
-    if (!g_u2f_attestation_ensure_result) {
-        return false;
-    }
-    g_u2f_cert_assets_present = true;
-    g_u2f_cert_check_result = true;
-    g_u2f_cert_key_load_result = true;
-    g_u2f_cert_key_matches_result = true;
-    return true;
-}
-
-bool u2f_data_generate_attestation_assets(void) {
-    return u2f_data_ensure_local_attestation_assets();
-}
-
-bool u2f_data_key_exists(void) {
-    return g_u2f_key_exists_result;
-}
-
-bool u2f_data_key_load(uint8_t *device_key) {
-    memset(device_key, 0, 32);
-    return g_u2f_key_load_result;
-}
-
-bool u2f_data_key_generate(uint8_t *device_key) {
-    g_u2f_key_generate_count++;
-    memset(device_key, 0, 32);
-    return true;
-}
-
-bool u2f_data_cnt_exists(void) {
-    return g_u2f_cnt_exists_result;
-}
-
-bool u2f_data_cnt_read(uint32_t *cnt) {
-    *cnt = 0;
-    return g_u2f_cnt_read_result;
-}
-
-bool u2f_data_cnt_write(uint32_t cnt) {
-    g_u2f_cnt_write_count++;
-    g_u2f_last_written_counter = cnt;
-    return true;
-}
-
-bool u2f_data_cnt_reserve(uint32_t cnt, uint32_t *reserved_cnt) {
-    g_u2f_cnt_reserve_count++;
-    g_u2f_last_reserved_counter = cnt + ZF_COUNTER_RESERVATION_WINDOW;
-    if (reserved_cnt) {
-        *reserved_cnt = g_u2f_last_reserved_counter;
-    }
-    return true;
 }
 
 bool zf_crypto_p256_private_key_valid(const uint8_t private_key[ZF_PRIVATE_KEY_LEN]) {
@@ -1839,14 +1720,10 @@ void mbedtls_sha256_finish(mbedtls_sha256_context *ctx, unsigned char output[32]
 }
 
 #include "../../../src/crypto/ecdsa_der.c"
-#include "../../../src/u2f/apdu.c"
-#include "../../../src/u2f/response_encode.c"
-#include "../../../src/u2f/session.c"
 
 #include "../../../src/transport/adapter.c"
 #include "../../../src/zerofido_storage.c"
 #include "../../../src/zerofido_runtime_config.c"
-#include "../../../src/u2f/adapter.c"
 #include "../../../src/transport/dispatch.c"
 #include "../../../src/transport/usb_hid_session.c"
 #include "../../../src/transport/usb_hid_worker.c"
@@ -1944,13 +1821,12 @@ static void test_nfc_init_app(ZerofidoApp *app, FuriMutex *mutex) {
 static void test_nfc_deinit_app(ZerofidoApp *app);
 
 #include "subsystems/nfc/tests.inc"
-#include "subsystems/u2f/tests.inc"
 #include "subsystems/transport/tests.inc"
 
 int main(void) {
     test_nfc_listener_profile_is_valid_iso14443_4a();
     test_nfc_select_applet_accepts_p2_no_fci();
-    test_nfc_select_applet_returns_fido2_version_when_u2f_disabled();
+    test_nfc_select_applet_returns_fido_2_0();
     test_nfc_select_applet_accepts_le_and_legacy_nine_byte_aid();
     test_nfc_event_callback_accepts_bare_select_apdu();
     test_nfc_iso4_listener_event_decodes_block_and_sends_framed_response();
@@ -2005,16 +1881,13 @@ int main(void) {
     test_nfc_stale_worker_completion_preserves_new_request();
     test_nfc_worker_response_buffer_survives_requeued_request();
     test_nfc_ctap_control_end_clears_selected_applet();
-    test_nfc_u2f_version_returns_immediately();
-    test_nfc_u2f_version_fallback_selects_fido_surface();
-    test_nfc_u2f_disabled_rejects_immediately_without_processing();
-    test_nfc_u2f_check_only_authenticate_returns_immediately();
-    test_nfc_u2f_register_returns_without_status_update();
+    test_nfc_ctap1_apdus_after_select_return_ins_not_supported();
+    test_nfc_preselect_ctap1_version_is_rejected();
     test_nfc_get_response_reports_remaining_bytes();
     test_nfc_ctap_get_response_ins_11_rejects_processing_without_advertised_support();
     test_nfc_ctap_get_response_ins_11_rejects_invalid_p1_p2();
     test_nfc_ctap_get_response_ins_11_reports_processing_with_advertised_support();
-    test_nfc_busy_u2f_request_preserves_shared_arena();
+    test_nfc_busy_ctap1_apdu_preserves_shared_arena();
     test_nfc_ctap_get_response_ins_11_returns_ready_response();
     test_nfc_field_off_marks_current_session_canceled();
     test_nfc_preselect_raw60_sends_iso_status();
@@ -2025,28 +1898,6 @@ int main(void) {
     test_nfc_raw60_does_not_make_next_framed_select_bare();
     test_nfc_preselect_raw_native_probe_traces_halt();
     test_nfc_selected_raw_native_probe_traces_selected_state();
-    test_short_u2f_version_request_is_accepted();
-    test_header_only_u2f_version_request_is_accepted_for_stock_compatibility();
-    test_u2f_version_accepts_exact_response_buffer();
-    test_u2f_version_accepts_extended_length_encoding();
-    test_u2f_version_extended_length_with_data_returns_wrong_length();
-    test_u2f_extended_length_wrap_is_rejected();
-    test_u2f_register_allows_nonzero_p1_p2_for_stock_compatibility();
-    test_u2f_dont_enforce_authenticate_mode_is_accepted_without_presence();
-    test_u2f_enforce_authenticate_rejects_invalid_handle_before_presence();
-    test_u2f_invalid_handle_clears_consumed_presence();
-    test_u2f_enforce_authenticate_hash_includes_user_presence_flag();
-    test_u2f_authenticate_reserves_counter_window();
-    test_zf_u2f_adapter_init_allows_missing_attestation_assets();
-    test_zf_u2f_adapter_init_creates_missing_device_key_and_counter();
-    test_zf_u2f_adapter_init_allows_invalid_attestation_assets();
-    test_u2f_adapter_auto_accept_bypasses_approval_prompt();
-    test_u2f_adapter_short_register_approval_uses_payload_app_id();
-    test_u2f_adapter_invalid_cla_returns_cla_not_supported();
-    test_u2f_adapter_invalid_cla_returns_cla_not_supported_without_live_backend();
-    test_u2f_adapter_version_returns_u2f_v2_without_live_backend();
-    test_u2f_adapter_version_with_data_returns_wrong_length_without_full_copy();
-    test_u2f_adapter_version_extended_length_with_data_returns_wrong_length();
     test_transport_reclaims_lru_cid_when_table_is_full();
     test_transport_allocate_cid_reclaims_lru_when_table_is_full();
     test_transport_cancel_marks_processing_request_without_pending_approval();
@@ -2063,12 +1914,11 @@ int main(void) {
     test_wait_for_interaction_processes_disconnect_when_coalesced_with_completion();
     test_wait_for_interaction_sends_immediate_keepalive();
     test_wait_for_interaction_repeats_keepalive_on_timeout();
-    test_wait_for_interaction_omits_keepalive_for_u2f_msg();
     test_transport_fragment_expires_on_session_tick();
     test_transport_request_wakeup_processes_one_complete_transaction();
     test_transport_request_without_wakeup_marks_connected_and_processes_packet();
-    test_transport_worker_idle_poll_processes_immediate_u2f_invalid_cla();
-    test_transport_worker_idle_poll_processes_immediate_u2f_version_data();
+    test_transport_worker_rejects_ctaphid_msg_with_invalid_cmd();
+    test_transport_init_advertises_nmsg_and_cbor();
     test_transport_request_wakeup_invalid_seq_allows_followup_init();
     test_transport_same_cid_init_like_invalid_seq_allows_followup_init();
     test_transport_out_of_order_continuation_returns_invalid_seq();
@@ -2083,9 +1933,6 @@ int main(void) {
     test_transport_connect_keeps_allocated_cids();
     test_transport_worker_syncs_initial_hal_connection_state();
     test_transport_dispatch_cbor_preserves_response_buffer();
-    test_transport_dispatch_u2f_version_with_data_returns_wrong_length();
-    test_transport_dispatch_u2f_version_extended_length_with_data_returns_wrong_length();
-    test_transport_dispatch_u2f_version_without_live_backend_returns_version();
-    puts("native transport/u2f regressions passed");
+    puts("native transport regressions passed");
     return 0;
 }

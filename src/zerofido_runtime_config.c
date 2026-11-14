@@ -125,8 +125,6 @@ void zf_runtime_config_load_defaults(ZfRuntimeConfig *config) {
     config->transport_mode = zf_runtime_config_default_transport_mode();
     config->fido2_enabled = true;
     config->fido2_profile = ZfFido2ProfileCurrent;
-    config->u2f_enabled = true;
-    config->u2f_profile = ZfU2fProfileCurrent;
     config->auto_accept_requests = false;
     config->attestation_mode = ZfAttestationModeNone;
 }
@@ -207,19 +205,18 @@ bool zf_runtime_config_persist(Storage *storage, const ZfRuntimeConfig *config) 
     ZfRuntimeConfigFileRecord record = {
         .magic = ZF_RUNTIME_CONFIG_FILE_MAGIC,
         .version = ZF_RUNTIME_CONFIG_FILE_VERSION,
-        .flags = config
-                     ? (((ZF_AUTO_ACCEPT_REQUESTS && config->auto_accept_requests)
-                             ? ZF_RUNTIME_CONFIG_FLAG_AUTO_ACCEPT_REQUESTS
-                             : 0U) |
-                        ZF_RUNTIME_CONFIG_FLAG_FIDO2_ENABLED)
-                     : 0U,
+        .flags = config ? (((ZF_AUTO_ACCEPT_REQUESTS && config->auto_accept_requests)
+                                ? ZF_RUNTIME_CONFIG_FLAG_AUTO_ACCEPT_REQUESTS
+                                : 0U) |
+                           ZF_RUNTIME_CONFIG_FLAG_FIDO2_ENABLED)
+                        : 0U,
         .transport_mode = config ? (uint8_t)config->transport_mode
                                  : (uint8_t)zf_runtime_config_default_transport_mode(),
-        .fido2_profile = config ? (uint8_t)zf_fido2_profile_for_build(config->fido2_profile) :
-                                  (uint8_t)ZfFido2ProfileCtap2_0,
-        .attestation_mode =
-            config ? (uint8_t)zf_attestation_mode_for_build(config->attestation_mode) :
-                     (uint8_t)ZfAttestationModeNone,
+        .fido2_profile = config ? (uint8_t)zf_fido2_profile_for_build(config->fido2_profile)
+                                : (uint8_t)ZfFido2ProfileCtap2_0,
+        .attestation_mode = config
+                                ? (uint8_t)zf_attestation_mode_for_build(config->attestation_mode)
+                                : (uint8_t)ZfAttestationModeNone,
     };
 
     if (!storage || !config || !zf_fido2_profile_is_valid((uint8_t)config->fido2_profile) ||
@@ -419,11 +416,10 @@ void zf_runtime_config_resolve_capabilities(const ZfRuntimeConfig *config,
     capabilities->nfc_enabled = nfc_enabled;
     capabilities->ble_enabled = ble_enabled;
     capabilities->fido2_enabled = true;
-    capabilities->u2f_enabled = config->u2f_enabled;
     capabilities->client_pin_enabled = true;
     capabilities->transport_keepalive_enabled = usb_hid_enabled || ble_enabled;
     capabilities->transport_cancel_enabled = usb_hid_enabled || ble_enabled;
-    capabilities->transport_wink_enabled = usb_hid_enabled && config->u2f_enabled;
+    capabilities->transport_wink_enabled = usb_hid_enabled;
     capabilities->fido2_profile = zf_fido2_profile_for_build(config->fido2_profile);
     capabilities->advertise_fido_2_1 =
         capabilities->fido2_profile == ZfFido2ProfileCtap2_1Experimental;
@@ -431,7 +427,6 @@ void zf_runtime_config_resolve_capabilities(const ZfRuntimeConfig *config,
     capabilities->advertise_fido_2_1 = false;
 #endif
     capabilities->advertise_fido_2_0 = true;
-    capabilities->advertise_u2f_v2 = config->u2f_enabled;
     capabilities->pin_uv_auth_token_enabled = capabilities->advertise_fido_2_1;
     capabilities->pin_uv_auth_protocol_2_enabled = capabilities->advertise_fido_2_1;
     capabilities->selection_enabled =

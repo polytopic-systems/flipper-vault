@@ -50,7 +50,7 @@ EXPECTED_STATIC_USER_VERIFICATION_DETAILS = [
 DEFAULT_STATIC_METADATA: dict[str, Any] = {
     "aaguid": "b51a976a-0b02-40aa-9d8a-36c8b91bbd1a",
     "authenticatorGetInfo": {
-        "versions": ["FIDO_2_0", "U2F_V2"],
+        "versions": ["FIDO_2_0"],
         "extensions": ["credProtect", "hmac-secret"],
         "aaguid": "b51a976a0b0240aa9d8a36c8b91bbd1a",
         "options": {"rk": True, "up": True, "plat": False},
@@ -650,7 +650,6 @@ class ConformanceSuiteService:
             "rp_counter": 0,
             "credentials": {},
             "browser_credentials": {},
-            "u2f": {},
             "pin": {
                 "current": self.config.get("fixture", {}).get("known_pin", "") or "",
                 "bootstrap": self.config.get("fixture", {}).get("bootstrap_pin", "") or "",
@@ -861,30 +860,9 @@ class ConformanceSuiteService:
                     ],
                 ),
                 (
-                    "u2f",
+                    "ctap1",
                     [
-                        ("u2f_version", lambda: self._scenario_u2f_version(matched, runtime), {}),
-                        ("u2f_invalid_apdu", lambda: self._scenario_u2f_invalid_apdu(matched), {}),
-                        (
-                            "u2f_register",
-                            lambda: self._scenario_u2f_register(matched, runtime),
-                            {
-                                "prompt": {
-                                    "title": "Approve U2F Registration",
-                                    "message": "Touch the device for the raw U2F registration ceremony.",
-                                }
-                            },
-                        ),
-                        (
-                            "u2f_authenticate",
-                            lambda: self._scenario_u2f_authenticate(matched, runtime),
-                            {
-                                "prompt": {
-                                    "title": "Approve U2F Authentication",
-                                    "message": "Touch the device for the raw U2F authentication ceremony.",
-                                }
-                            },
-                        ),
+                        ("ctap1_rejected", lambda: self._scenario_ctap1_rejected(matched), {}),
                     ],
                 ),
             ]
@@ -1195,6 +1173,7 @@ class ConformanceSuiteService:
                     "capabilities_hex": f"0x{caps:02x}",
                     "wink_supported": bool(caps & 0x01),
                     "cbor_supported": bool(caps & 0x04),
+                    "nmsg_set": bool(caps & probe.CAPABILITY_NMSG),
                 },
                 "evidence": {"trace": trace, "response_payload_hex": response_payload.hex()},
             }
@@ -2122,68 +2101,26 @@ class ConformanceSuiteService:
             }
         return self._with_device(matched, run)
 
-    def _scenario_u2f_version(self, matched: MatchedDevice, runtime: dict[str, Any]) -> dict[str, Any]:
+    def _scenario_ctap1_rejected(self, matched: MatchedDevice) -> dict[str, Any]:
+        """Legacy U2F (CTAP1) is not implemented: CTAPHID_MSG must fail with ERR_INVALID_CMD."""
         def run(device: hid.device) -> dict[str, Any]:
             trace: list[dict[str, str]] = []
             cid = self._get_run_cid(device, "msg", trace)
             response_cid, response_cmd, response_payload = self._transact_run_channel(
                 device, "msg", probe.MSG, probe.build_u2f_version_apdu(), trace
             )
-            parsed = probe.decode_u2f_response_payload(response_payload)
-            if response_cmd != probe.MSG or response_cid != cid or response_payload[-2:] != probe.U2F_SW_NO_ERROR:
-                raise RuntimeError("U2F VERSION failed")
-            return {"status": "passed", "summary": "U2F VERSION returned U2F_V2", "details": parsed, "evidence": {"trace": trace}}
-        return self._with_device(matched, run)
-
-    def _scenario_u2f_invalid_apdu(self, matched: MatchedDevice) -> dict[str, Any]:
-        def run(device: hid.device) -> dict[str, Any]:
-            trace: list[dict[str, str]] = []
-            cid = self._get_run_cid(device, "msg", trace)
-            invalid = bytes([0x01, probe.U2F_VERSION, 0x00, 0x00, 0x00, 0x00, 0x00])
-            response_cid, response_cmd, response_payload = self._transact_run_channel(
-                device, "msg", probe.MSG, invalid, trace
-            )
-            if response_cmd != probe.MSG or response_cid != cid or response_payload[-2:] == probe.U2F_SW_NO_ERROR:
-                raise RuntimeError("invalid U2F APDU was not rejected")
-            return {"status": "passed", "summary": "invalid U2F APDU header was rejected", "details": probe.decode_u2f_response_payload(response_payload), "evidence": {"trace": trace}}
-        return self._with_device(matched, run)
-
-    def _scenario_u2f_register(self, matched: MatchedDevice, runtime: dict[str, Any]) -> dict[str, Any]:
-        def run(device: hid.device) -> dict[str, Any]:
-            trace: list[dict[str, str]] = []
-            cid = self._get_run_cid(device, "msg", trace)
-            challenge = hashlib.sha256(b"zerofido-suite-u2f-register").digest()
-            app_id = hashlib.sha256(b"zerofido-suite-u2f-app").digest()
-            response_cid, response_cmd, response_payload = self._transact_run_channel(
-                device, "msg", probe.MSG, probe.build_u2f_register_apdu(challenge, app_id), trace
-            )
-            if response_cmd != probe.MSG or response_cid != cid or response_payload[-2:] != probe.U2F_SW_NO_ERROR:
-                raise RuntimeError("U2F REGISTER failed")
-            runtime["u2f"]["app_id"] = app_id
-            runtime["u2f"]["key_handle"] = probe.extract_u2f_key_handle(response_payload)
-            return {"status": "passed", "summary": "U2F register succeeded", "details": probe.decode_u2f_response_payload(response_payload), "evidence": {"trace": trace}}
-        return self._with_device(matched, run)
-
-    def _scenario_u2f_authenticate(self, matched: MatchedDevice, runtime: dict[str, Any]) -> dict[str, Any]:
-        key_handle = runtime["u2f"].get("key_handle")
-        app_id = runtime["u2f"].get("app_id")
-        if not key_handle or not app_id:
-            return {"status": "blocked", "summary": "U2F register prerequisite is missing"}
-
-        def run(device: hid.device) -> dict[str, Any]:
-            trace: list[dict[str, str]] = []
-            cid = self._get_run_cid(device, "msg", trace)
-            challenge = hashlib.sha256(b"zerofido-suite-u2f-auth").digest()
-            response_cid, response_cmd, response_payload = self._transact_run_channel(
-                device,
-                "msg",
-                probe.MSG,
-                probe.build_u2f_authenticate_apdu(challenge, app_id, key_handle),
-                trace,
-            )
-            if response_cmd != probe.MSG or response_cid != cid or response_payload[-2:] != probe.U2F_SW_NO_ERROR:
-                raise RuntimeError("U2F AUTHENTICATE failed")
-            return {"status": "passed", "summary": "U2F authenticate succeeded", "details": probe.decode_u2f_response_payload(response_payload), "evidence": {"trace": trace}}
+            if (
+                response_cid != cid
+                or response_cmd != probe.ERROR
+                or response_payload[:1] != bytes([probe.ERR_INVALID_CMD])
+            ):
+                raise RuntimeError("CTAPHID_MSG (U2F VERSION) was not rejected with ERR_INVALID_CMD")
+            return {
+                "status": "passed",
+                "summary": "CTAPHID_MSG rejected with ERR_INVALID_CMD (CTAP1/U2F not supported)",
+                "details": {"response_cmd": f"0x{response_cmd:02x}", "error_hex": response_payload.hex()},
+                "evidence": {"trace": trace},
+            }
         return self._with_device(matched, run)
 
     def _run_browser_scenario(self, scenario_id: str, payload: dict[str, Any]) -> dict[str, Any]:

@@ -36,24 +36,30 @@ static inline bool zf_store_has_suffix(const char *value, const char *suffix) {
     return value_len >= suffix_len && strcmp(value + value_len - suffix_len, suffix) == 0;
 }
 
+/* One format string for every record path keeps a single copy of the data-dir prefix. */
+static inline void zf_store_build_path_with_suffix(const char *file_name, const char *suffix,
+                                                   char *path, size_t path_size) {
+    snprintf(path, path_size, ZF_APP_DATA_DIR "/%s%s", file_name, suffix);
+}
+
 static inline void zf_store_build_record_path(const char *file_name, char *path, size_t path_size) {
-    snprintf(path, path_size, ZF_APP_DATA_DIR "/%s", file_name);
+    zf_store_build_path_with_suffix(file_name, "", path, path_size);
 }
 
 static inline void zf_store_build_temp_path(const char *file_name, char *path, size_t path_size) {
-    snprintf(path, path_size, ZF_APP_DATA_DIR "/%s.tmp", file_name);
+    zf_store_build_path_with_suffix(file_name, ".tmp", path, path_size);
 }
 
 static inline void zf_store_build_backup_path(const char *file_name, char *path, size_t path_size) {
-    snprintf(path, path_size, ZF_APP_DATA_DIR "/%s.bak", file_name);
+    zf_store_build_path_with_suffix(file_name, ".bak", path, path_size);
 }
 
 static inline void zf_store_build_counter_floor_path(const char *file_name, char *path,
                                                      size_t path_size) {
-    snprintf(path, path_size, ZF_APP_DATA_DIR "/%s.counter", file_name);
+    zf_store_build_path_with_suffix(file_name, ".counter", path, path_size);
 }
 
 static inline void zf_store_build_counter_floor_temp_path(const char *file_name, char *path,
                                                           size_t path_size) {
-    snprintf(path, path_size, ZF_APP_DATA_DIR "/%s.counter.tmp", file_name);
+    zf_store_build_path_with_suffix(file_name, ".counter.tmp", path, path_size);
 }

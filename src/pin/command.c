@@ -182,7 +182,7 @@ uint8_t zerofido_pin_handle_command_with_session(ZerofidoApp *app, ZfTransportSe
 #endif
     zf_runtime_get_effective_capabilities(app, &capabilities);
     if (parsed->has_pin_protocol && parsed->pin_protocol == ZF_PIN_PROTOCOL_V2 &&
-        !capabilities.pin_uv_auth_protocol_2_enabled) {
+        !ZF_CAP_FIDO21(capabilities.pin_uv_auth_protocol_2_enabled)) {
         status = ZF_CTAP_ERR_INVALID_PARAMETER;
         goto cleanup;
     }
@@ -200,10 +200,11 @@ uint8_t zerofido_pin_handle_command_with_session(ZerofidoApp *app, ZfTransportSe
     case ZF_CLIENT_PIN_SUBCMD_GET_PIN_TOKEN:
         status = zf_client_pin_handle_get_pin_token(
             app, app->storage, state, parsed, scratch, false,
-            capabilities.client_pin_token_requires_consent, session_id, out, out_capacity, out_len);
+            ZF_CAP_FIDO21(capabilities.client_pin_token_requires_consent), session_id, out,
+            out_capacity, out_len);
         break;
     case ZF_CLIENT_PIN_SUBCMD_GET_PIN_UV_AUTH_TOKEN_USING_PIN_WITH_PERMISSIONS:
-        if (!capabilities.pin_uv_auth_token_enabled) {
+        if (!ZF_CAP_FIDO21(capabilities.pin_uv_auth_token_enabled)) {
             status = ZF_CTAP_ERR_INVALID_SUBCOMMAND;
             break;
         }

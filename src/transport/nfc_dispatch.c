@@ -30,9 +30,6 @@
 #include "../zerofido_runtime_config.h"
 #include "../zerofido_ui.h"
 #include "../ctap/response.h"
-#include "../u2f/apdu.h"
-#include "../u2f/adapter.h"
-#include "../u2f/common.h"
 #include "nfc_iso_dep.h"
 #include "nfc_protocol.h"
 #include "nfc_session.h"
@@ -320,7 +317,6 @@ static bool zf_transport_nfc_send_ctap2_direct(ZerofidoApp *app, ZfNfcTransportS
     state->response_len = response_len;
     state->response_offset = 0U;
     state->response_ready = true;
-    state->response_is_u2f = false;
     state->response_is_error = false;
     state->error_status_word = 0U;
     state->processing = false;
@@ -339,196 +335,6 @@ static bool zf_transport_nfc_send_ctap2_direct(ZerofidoApp *app, ZfNfcTransportS
         .has_le = true,
     };
     return zf_transport_nfc_send_get_response(app, state, &get_response_apdu);
-}
-
-static bool zf_transport_nfc_send_u2f_response(const ZerofidoApp *app, ZfNfcTransportState *state,
-                                               const ZfNfcApdu *apdu, const uint8_t *response,
-                                               size_t response_len) {
-    uint16_t status_word = ZF_NFC_SW_INTERNAL_ERROR;
-    uint8_t *arena = NULL;
-    size_t arena_capacity = 0U;
-
-    if (!app || !state || !apdu || !response || response_len < 2U) {
-        return zf_transport_nfc_send_status_word(state, ZF_NFC_SW_INTERNAL_ERROR);
-    }
-
-    status_word = ((uint16_t)response[response_len - 2U] << 8) | response[response_len - 1U];
-    if (response_len <= ZF_NFC_MAX_TX_FRAME_INF_SIZE) {
-        return zf_transport_nfc_send_apdu_payload(state, response, response_len - 2U, status_word);
-    }
-
-    arena = zf_transport_nfc_arena(state);
-    arena_capacity = zf_transport_nfc_arena_capacity(state);
-    if (!arena || response_len > arena_capacity) {
-        zf_transport_nfc_reset_exchange_locked(state);
-        return zf_transport_nfc_send_status_word(state, ZF_NFC_SW_INTERNAL_ERROR);
-    }
-    if (response != arena) {
-        memcpy(arena, response, response_len);
-    }
-
-    state->response_len = response_len;
-    state->response_offset = 0U;
-    state->response_ready = true;
-    state->response_is_u2f = true;
-    state->response_is_error = false;
-    state->error_status_word = 0U;
-    state->processing = false;
-    state->request_pending = false;
-    state->request_kind = ZfNfcRequestKindNone;
-    state->processing_session_id = 0U;
-    state->command_chain_active = false;
-    state->ctap_get_response_supported = false;
-
-    return zf_transport_nfc_send_get_response(app, state, apdu);
-}
-
-static inline size_t zf_transport_nfc_run_u2f_adapter(ZerofidoApp *app, ZfNfcTransportState *state,
-                                                      size_t u2f_request_len,
-                                                      const char *success_diag,
-                                                      const char *error_diag) {
-    const size_t response_len =
-        zf_u2f_adapter_handle_msg(app, state->session_id, app->transport_arena, u2f_request_len,
-                                  app->transport_arena, ZF_TRANSPORT_ARENA_SIZE);
-    UNUSED(success_diag);
-    UNUSED(error_diag);
-    ZF_NFC_DIAG_EVENT(response_len >= 2U || !error_diag ? success_diag : error_diag);
-    return response_len;
-}
-
-static bool zf_transport_nfc_send_encoded_u2f_immediate(ZerofidoApp *app,
-                                                        ZfNfcTransportState *state,
-                                                        const ZfNfcApdu *apdu,
-                                                        size_t u2f_request_len,
-                                                        const char *success_diag,
-                                                        const char *error_diag,
-                                                        bool auto_accept,
-                                                        bool caller_holds_ui_mutex) {
-    bool old_auto_accept = false;
-    size_t response_len = 0U;
-
-    if (auto_accept) {
-        if (!caller_holds_ui_mutex) {
-            furi_mutex_acquire(app->ui_mutex, FuriWaitForever);
-        }
-        old_auto_accept = app->transport_auto_accept_transaction;
-        app->transport_auto_accept_transaction = true;
-        furi_mutex_release(app->ui_mutex);
-    }
-
-    response_len = zf_transport_nfc_run_u2f_adapter(app, state, u2f_request_len, success_diag,
-                                                    error_diag);
-
-    if (auto_accept) {
-        zerofido_ui_refresh_status(app);
-        furi_mutex_acquire(app->ui_mutex, FuriWaitForever);
-        app->transport_auto_accept_transaction = old_auto_accept;
-        if (!caller_holds_ui_mutex) {
-            furi_mutex_release(app->ui_mutex);
-        }
-    }
-
-    return zf_transport_nfc_send_u2f_response(app, state, apdu, app->transport_arena,
-                                              response_len);
-}
-
-static bool zf_transport_nfc_send_u2f_immediate(ZerofidoApp *app, ZfNfcTransportState *state,
-                                                const ZfNfcApdu *apdu, size_t u2f_request_len,
-                                                bool caller_holds_ui_mutex) {
-    if (!app || !state || !apdu || u2f_request_len == 0U) {
-        return zf_transport_nfc_send_status_word(state, ZF_NFC_SW_WRONG_LENGTH);
-    }
-
-    return zf_transport_nfc_send_encoded_u2f_immediate(
-        app, state, apdu, u2f_request_len, "U2F immediate", "U2F error", true,
-        caller_holds_ui_mutex);
-}
-
-static bool zf_transport_nfc_send_u2f_version_immediate(ZerofidoApp *app,
-                                                        ZfNfcTransportState *state,
-                                                        const ZfNfcApdu *apdu, bool *handled) {
-    size_t u2f_request_len = 0;
-
-    if (handled) {
-        *handled = false;
-    }
-    if (!app || !state || !apdu || !handled) {
-        return false;
-    }
-    if (apdu->cla != 0x00U || apdu->ins != U2F_CMD_VERSION || apdu->chained) {
-        return false;
-    }
-
-    *handled = true;
-    if (zf_transport_nfc_exchange_busy(state)) {
-        return zf_transport_nfc_send_busy_status(state);
-    }
-
-    const bool fallback = !state->applet_selected;
-    if (fallback) {
-        state->applet_selected = true;
-        state->field_active = true;
-        state->iso4_active = true;
-        state->session_id = zf_transport_nfc_next_session_id(state->session_id);
-        state->canceled_session_id = 0;
-        zf_transport_nfc_note_ui_stage_locked(state, ZfNfcUiStageAppletSelected);
-        zf_transport_nfc_reset_exchange_locked(state);
-    }
-    u2f_request_len =
-        zf_transport_nfc_encode_u2f_request(apdu, app->transport_arena, ZF_MAX_MSG_SIZE);
-    if (u2f_request_len == 0U) {
-        return zf_transport_nfc_send_status_word(state, ZF_NFC_SW_WRONG_LENGTH);
-    }
-
-    return zf_transport_nfc_send_encoded_u2f_immediate(
-        app, state, apdu, u2f_request_len, fallback ? "U2F VERSION fallback" : "U2F VERSION",
-        fallback ? "U2F fallback error" : "U2F error", false, false);
-}
-
-static bool zf_transport_nfc_send_u2f_immediate_without_presence(ZerofidoApp *app,
-                                                                 ZfNfcTransportState *state,
-                                                                 const ZfNfcApdu *apdu,
-                                                                 bool *handled) {
-    const char *operation = NULL;
-    size_t u2f_request_len = 0U;
-    size_t response_len = 0U;
-
-    if (handled) {
-        *handled = false;
-    }
-    if (!app || !state || !apdu || !handled || apdu->cla != 0x00U || apdu->chained) {
-        return false;
-    }
-
-    u2f_request_len =
-        zf_transport_nfc_encode_u2f_request(apdu, app->transport_arena, ZF_MAX_MSG_SIZE);
-    if (u2f_request_len == 0U) {
-        *handled = true;
-        return zf_transport_nfc_send_status_word(state, ZF_NFC_SW_WRONG_LENGTH);
-    }
-
-    response_len =
-        u2f_validate_request_into_response(app->transport_arena, (uint16_t)u2f_request_len,
-                                           app->transport_arena, ZF_TRANSPORT_ARENA_SIZE);
-    if (response_len != 0U) {
-        *handled = true;
-        ZF_NFC_DIAG_EVENT("U2F invalid");
-        return zf_transport_nfc_send_u2f_response(app, state, apdu, app->transport_arena,
-                                                  response_len);
-    }
-
-    if (u2f_request_needs_user_presence(app->transport_arena, (uint16_t)u2f_request_len,
-                                        &operation)) {
-        return false;
-    }
-
-    *handled = true;
-    return zf_transport_nfc_send_encoded_u2f_immediate(
-        app, state, apdu, u2f_request_len,
-        apdu->ins == U2F_CMD_AUTHENTICATE
-            ? "U2F check-only"
-            : (apdu->ins == U2F_CMD_VERSION ? "U2F VERSION" : "U2F immediate"),
-        NULL, false, false);
 }
 
 static bool zf_transport_nfc_finish_ctap2_msg(ZerofidoApp *app, ZfNfcTransportState *state,
@@ -563,7 +369,8 @@ static bool zf_transport_nfc_finish_ctap2_msg(ZerofidoApp *app, ZfNfcTransportSt
  * - CTAP control END clears selected applet/session state.
  * - CTAP2 MSG runs direct for iOS no-GR readers and queues readers that support GET_RESPONSE.
  * - ISO GET RESPONSE drains pending APDU/chained response data.
- * - CLA=00 U2F APDUs route through the legacy U2F adapter.
+ * - Anything else, including CTAP1/U2F APDUs (CLA=00 INS 01..03), gets SW_INS_NOT_SUPPORTED:
+ *   legacy U2F is not implemented and SELECT answers "FIDO_2_0".
  */
 static bool zf_transport_nfc_handle_apdu_internal(ZerofidoApp *app, ZfNfcTransportState *state,
                                                   const uint8_t *apdu_bytes, size_t apdu_len,
@@ -614,17 +421,8 @@ static bool zf_transport_nfc_handle_apdu_internal(ZerofidoApp *app, ZfNfcTranspo
 #else
         (void)valid_select;
 #endif
-        const bool handled = zf_transport_nfc_handle_select(state, &apdu, &capabilities);
+        const bool handled = zf_transport_nfc_handle_select(state, &apdu);
         return handled;
-    }
-
-    if (!state->applet_selected && capabilities.u2f_enabled) {
-        bool u2f_version_handled = false;
-        const bool u2f_version_result =
-            zf_transport_nfc_send_u2f_version_immediate(app, state, &apdu, &u2f_version_handled);
-        if (u2f_version_handled) {
-            return u2f_version_result;
-        }
     }
 
     if (raw_cla == 0x90U && apdu.ins == 0x60U && apdu.p1 == 0x00U && apdu.p2 == 0x00U) {
@@ -738,34 +536,6 @@ static bool zf_transport_nfc_handle_apdu_internal(ZerofidoApp *app, ZfNfcTranspo
         }
 
         return zf_transport_nfc_finish_ctap2_msg(app, state, caller_holds_ui_mutex, apdu.extended);
-    }
-
-    if (apdu.cla == 0x00U) {
-        size_t u2f_request_len = 0;
-        bool u2f_immediate_handled = false;
-        bool u2f_immediate_result = false;
-
-        if (!capabilities.u2f_enabled) {
-            return zf_transport_nfc_send_status_word(state, ZF_NFC_SW_INS_NOT_SUPPORTED);
-        }
-        if (apdu.chained) {
-            return zf_transport_nfc_send_status_word(state, ZF_NFC_SW_INS_NOT_SUPPORTED);
-        }
-        if (zf_transport_nfc_exchange_busy(state)) {
-            return zf_transport_nfc_send_busy_status(state);
-        }
-        u2f_immediate_result = zf_transport_nfc_send_u2f_immediate_without_presence(
-            app, state, &apdu, &u2f_immediate_handled);
-        if (u2f_immediate_handled) {
-            return u2f_immediate_result;
-        }
-        u2f_request_len =
-            zf_transport_nfc_encode_u2f_request(&apdu, app->transport_arena, ZF_MAX_MSG_SIZE);
-        if (u2f_request_len == 0) {
-            return zf_transport_nfc_send_status_word(state, ZF_NFC_SW_WRONG_LENGTH);
-        }
-        return zf_transport_nfc_send_u2f_immediate(app, state, &apdu, u2f_request_len,
-                                                   caller_holds_ui_mutex);
     }
 
     return zf_transport_nfc_send_status_word(state, ZF_NFC_SW_INS_NOT_SUPPORTED);

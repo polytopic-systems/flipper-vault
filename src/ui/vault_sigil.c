@@ -58,40 +58,17 @@ static uint32_t sigil_glyph_bits(const VaultSigilSeed *seed) {
     return bits;
 }
 
-static bool sigil_cell(uint32_t bits, int32_t row, int32_t col) {
-    if (row < 0 || row > 4 || col < 0 || col > 4)
-        return false;
-    int32_t mc = col <= 2 ? col : 4 - col;
-    return (bits >> (row * 3 + mc)) & 1U;
-}
-
 void vault_sigil_draw(Canvas *canvas, int32_t x, int32_t y, int32_t scale,
                       const VaultSigilSeed *seed) {
     uint32_t bits = sigil_glyph_bits(seed);
     const int32_t s = scale < 1 ? 1 : scale;
 
+    /* 5x5 cells, columns mirrored around the centre. */
     for (int32_t row = 0; row < 5; ++row) {
         for (int32_t col = 0; col < 5; ++col) {
-            if (!sigil_cell(bits, row, col))
-                continue;
-            int32_t px = x + col * 3 * s;
-            int32_t py = y + row * 3 * s;
-            canvas_draw_box(canvas, px, py, 3 * s, 3 * s);
-            /* Round off convex corners so joined cells read as one stroke. */
-            bool up = sigil_cell(bits, row - 1, col);
-            bool down = sigil_cell(bits, row + 1, col);
-            bool left = sigil_cell(bits, row, col - 1);
-            bool right = sigil_cell(bits, row, col + 1);
-            canvas_invert_color(canvas);
-            if (!up && !left)
-                canvas_draw_box(canvas, px, py, s, s);
-            if (!up && !right)
-                canvas_draw_box(canvas, px + 2 * s, py, s, s);
-            if (!down && !left)
-                canvas_draw_box(canvas, px, py + 2 * s, s, s);
-            if (!down && !right)
-                canvas_draw_box(canvas, px + 2 * s, py + 2 * s, s, s);
-            canvas_invert_color(canvas);
+            int32_t mc = col <= 2 ? col : 4 - col;
+            if ((bits >> (row * 3 + mc)) & 1U)
+                canvas_draw_box(canvas, x + col * 3 * s, y + row * 3 * s, 3 * s, 3 * s);
         }
     }
 }

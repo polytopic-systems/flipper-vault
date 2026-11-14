@@ -1,7 +1,9 @@
 """Compile and run the host-native protocol regression binaries.
 
-The script builds the CTAP/PIN/store regression suite and the transport/U2F
-suite with the same fake Flipper headers used by CI, then executes both binaries.
+The script builds the CTAP/PIN/store regression suite (dev CTAP 2.1 and release
+configurations) and the USB/NFC transport suite with the same fake Flipper headers
+used by CI, then executes the binaries. Legacy U2F (CTAP1) is not supported; the
+suites check that CTAP1 requests are rejected on every transport.
 """
 
 from __future__ import annotations
@@ -13,14 +15,15 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 NATIVE_SOURCE = ROOT / "tests" / "native" / "protocol" / "runner.c"
-NATIVE_TRANSPORT_SOURCE = ROOT / "tests" / "native" / "transport_u2f" / "runner.c"
+NATIVE_TRANSPORT_SOURCE = ROOT / "tests" / "native" / "transport" / "runner.c"
 NATIVE_CRYPTO_SOURCE = ROOT / "tests" / "native" / "crypto" / "runner.c"
 NATIVE_BLE_SOURCE = ROOT / "tests" / "native" / "ble" / "runner.c"
 NATIVE_INCLUDE = ROOT / "tests" / "native" / "include"
 NATIVE_BINARY = ROOT / ".tmp" / "native_protocol_regressions"
 NATIVE_PACKED_OFF_BINARY = ROOT / ".tmp" / "native_protocol_regressions_packed_off"
 NATIVE_BLE_PROTOCOL_BINARY = ROOT / ".tmp" / "native_protocol_regressions_ble"
-NATIVE_TRANSPORT_BINARY = ROOT / ".tmp" / "native_transport_u2f_regressions"
+NATIVE_RELEASE_PROTOCOL_BINARY = ROOT / ".tmp" / "native_protocol_regressions_release"
+NATIVE_TRANSPORT_BINARY = ROOT / ".tmp" / "native_transport_regressions"
 NATIVE_CRYPTO_BINARY = ROOT / ".tmp" / "native_crypto_regressions"
 NATIVE_BLE_BINARY = ROOT / ".tmp" / "native_ble_framing_regressions"
 POLICY_SOURCE = ROOT / "src" / "ctap" / "policy.c"
@@ -33,7 +36,7 @@ def run(cmd: list[str]) -> None:
 
 
 def main() -> None:
-    """Build both native regression binaries and fail on the first error."""
+    """Build the native regression binaries and fail on the first error."""
     compiler = shutil.which("cc") or shutil.which("clang") or shutil.which("gcc")
     if not compiler:
         raise SystemExit("missing host C compiler")
@@ -135,6 +138,29 @@ def main() -> None:
         ]
     )
     run([str(NATIVE_BLE_PROTOCOL_BINARY)])
+    # Release configuration: CTAP 2.1 paths compiled out (ZF_DEV_FIDO2_1=0). Only the
+    # release checks run here, so the rest of the suite is legitimately unused.
+    run(
+        [
+            compiler,
+            "-std=c11",
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            "-Wno-unused-function",
+            "-DZF_HOST_TEST",
+            "-DZF_RELEASE_DIAGNOSTICS=1",
+            "-DZF_DEV_FIDO2_1=0",
+            "-I",
+            str(NATIVE_INCLUDE),
+            "-I",
+            str(ROOT / "src"),
+            str(NATIVE_SOURCE),
+            "-o",
+            str(NATIVE_RELEASE_PROTOCOL_BINARY),
+        ]
+    )
+    run([str(NATIVE_RELEASE_PROTOCOL_BINARY)])
     run(
         [
             compiler,

@@ -99,14 +99,14 @@ uint8_t zf_ctap_handle_make_credential(ZerofidoApp *app, ZfTransportSessionId se
     zf_runtime_get_effective_capabilities(app, &capabilities);
     status = zf_ctap_validate_pin_auth_protocol(
         scratch->request.has_pin_auth, scratch->request.has_pin_protocol,
-        scratch->request.pin_protocol, capabilities.pin_uv_auth_protocol_2_enabled);
+        scratch->request.pin_protocol, ZF_CAP_FIDO21(capabilities.pin_uv_auth_protocol_2_enabled));
     if (status != ZF_CTAP_SUCCESS) {
         goto cleanup;
     }
     snprintf(scratch->user_line, sizeof(scratch->user_line), "User: %s",
              scratch->request.user_name[0] ? scratch->request.user_name : "(not provided)");
     if (scratch->request.has_pin_auth && scratch->request.pin_auth_len == 0) {
-        status = zf_ctap_handle_empty_pin_auth_probe(app, session_id, "Register",
+        status = zf_ctap_handle_empty_pin_auth_probe(app, session_id, "Create passkey",
                                                      scratch->request.rp_id, scratch->user_line);
         goto cleanup;
     }
@@ -154,7 +154,7 @@ uint8_t zf_ctap_handle_make_credential(ZerofidoApp *app, ZfTransportSessionId se
         uv_verified, scratch->work.io.store_io, sizeof(scratch->work.io.store_io));
     zf_ctap_end_maintenance(app);
     if (excluded) {
-        status = zf_ctap_request_approval(app, "Register", scratch->request.rp_id,
+        status = zf_ctap_request_approval(app, "Create passkey", scratch->request.rp_id,
                                           scratch->user_line, session_id);
         status = status == ZF_CTAP_ERR_KEEPALIVE_CANCEL ? status : ZF_CTAP_ERR_CREDENTIAL_EXCLUDED;
         goto cleanup;
@@ -172,8 +172,8 @@ uint8_t zf_ctap_handle_make_credential(ZerofidoApp *app, ZfTransportSessionId se
     }
 
     ZF_CTAP_MC_DIAG("approval");
-    status = zf_ctap_request_approval(app, "Register", scratch->request.rp_id, scratch->user_line,
-                                      session_id);
+    status = zf_ctap_request_approval(app, "Create passkey", scratch->request.rp_id,
+                                      scratch->user_line, session_id);
     if (status != ZF_CTAP_SUCCESS) {
         goto cleanup;
     }
@@ -209,8 +209,8 @@ uint8_t zf_ctap_handle_make_credential(ZerofidoApp *app, ZfTransportSessionId se
     (void)attestation_mode;
     status = zf_ctap_build_none_make_credential_response_with_scratch(
         &scratch->work.response, scratch->request.rp_id, &scratch->record, uv_verified,
-        scratch->request.has_cred_protect, scratch->request.hmac_secret_requested, out, out_capacity,
-        out_len);
+        scratch->request.has_cred_protect, scratch->request.hmac_secret_requested, out,
+        out_capacity, out_len);
 #endif
     if (status != ZF_CTAP_SUCCESS) {
         goto cleanup;

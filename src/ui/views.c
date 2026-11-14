@@ -175,27 +175,14 @@ void zerofido_ui_switch_to_view(ZerofidoApp *app, ZfViewId view_id) {
     }
 }
 
-static bool zerofido_pin_status_message(uint8_t status, FuriString *error) {
-    switch (status) {
-    case ZF_CTAP_SUCCESS:
-        return true;
-    case ZF_CTAP_ERR_PIN_POLICY_VIOLATION:
+/* Validator for new and current PINs: only the length can be checked before submit. */
+static bool zerofido_pin_length_ok(const char *text, FuriString *error) {
+    size_t pin_len = strlen(text);
+    if (pin_len < 4 || pin_len > 63) {
         furi_string_set(error, "PIN must be\n4-63 chars");
-        break;
-    case ZF_CTAP_ERR_PIN_INVALID:
-        furi_string_set(error, "Current PIN\nis incorrect");
-        break;
-    case ZF_CTAP_ERR_PIN_AUTH_BLOCKED:
-        furi_string_set(error, "PIN attempts are\nblocked");
-        break;
-    case ZF_CTAP_ERR_PIN_NOT_SET:
-        furi_string_set(error, "PIN is not set");
-        break;
-    default:
-        furi_string_set(error, "PIN update failed");
-        break;
+        return false;
     }
-    return false;
+    return true;
 }
 
 static const char *zerofido_pin_status_text(uint8_t status) {
@@ -211,14 +198,6 @@ static const char *zerofido_pin_status_text(uint8_t status) {
     default:
         return "PIN update failed";
     }
-}
-
-static uint8_t zerofido_pin_length_status(const char *text) {
-    size_t pin_len = strlen(text);
-    if (pin_len < 4 || pin_len > 63) {
-        return ZF_CTAP_ERR_PIN_POLICY_VIOLATION;
-    }
-    return ZF_CTAP_SUCCESS;
 }
 
 static ZfPinBuffers *zerofido_pin_buffers_acquire(ZerofidoApp *app) {
@@ -528,52 +507,26 @@ static bool zerofido_finish_assertion_selection_locked(ZerofidoApp *app, uint32_
     return true;
 }
 
-static bool zerofido_select_next_position(uint32_t *values, size_t count, bool found_selected,
-                                          size_t selected_pos, int8_t direction,
-                                          uint32_t *selected_value) {
-    if (!values || !selected_value || count == 0U) {
-        return false;
-    }
-
-    if (!found_selected) {
-        selected_pos = 0;
-    } else if (direction < 0) {
-        selected_pos = selected_pos == 0U ? count - 1U : selected_pos - 1U;
-    } else {
-        selected_pos = selected_pos + 1U >= count ? 0U : selected_pos + 1U;
-    }
-    *selected_value = values[selected_pos];
-    return true;
-}
-
+/* Moves the home-list selection to the next/previous stored passkey, wrapping around. */
 static bool zerofido_select_next_stored_credential_locked(ZerofidoApp *app, int8_t direction) {
-    uint32_t values[ZF_MAX_CREDENTIALS];
-    size_t count = 0;
-    size_t selected_pos = 0;
-    bool found_selected = false;
-    uint32_t selected_value = 0;
+    const size_t count = app->store.records ? app->store.count : 0U;
+    size_t index = app->credentials_selected_index;
+    bool selected_valid = index < count && app->store.records[index].in_use;
 
-    if (app->store.records) {
-        for (size_t i = 0; i < app->store.count && count < COUNT_OF(values); ++i) {
-            if (!app->store.records[i].in_use) {
-                continue;
-            }
-
-            values[count] = (uint32_t)i;
-            if ((uint32_t)i == app->credentials_selected_index) {
-                selected_pos = count;
-                found_selected = true;
-            }
-            ++count;
+    for (size_t step = 0; step < count; ++step) {
+        if (!selected_valid) {
+            index = step; /* no valid selection: take the first stored passkey */
+        } else if (direction < 0) {
+            index = index == 0U ? count - 1U : index - 1U;
+        } else {
+            index = index + 1U >= count ? 0U : index + 1U;
+        }
+        if (app->store.records[index].in_use) {
+            app->credentials_selected_index = (uint32_t)index;
+            return true;
         }
     }
-
-    if (!zerofido_select_next_position(values, count, found_selected, selected_pos, direction,
-                                       &selected_value)) {
-        return false;
-    }
-    app->credentials_selected_index = selected_value;
-    return true;
+    return false;
 }
 
 static void zerofido_refresh_credentials_menu(ZerofidoApp *app) {
@@ -875,7 +828,7 @@ static bool zerofido_pin_input_validator_callback(const char *text, FuriString *
     switch (app->pin_input_state) {
     case ZfPinInputSetNew:
     case ZfPinInputChangeNew:
-        return zerofido_pin_status_message(zerofido_pin_length_status(text), error);
+        return zerofido_pin_length_ok(text, error);
     case ZfPinInputSetConfirm:
     case ZfPinInputChangeConfirm:
         if (!pin_buffers) {
@@ -889,7 +842,7 @@ static bool zerofido_pin_input_validator_callback(const char *text, FuriString *
         return true;
     case ZfPinInputChangeCurrent:
     case ZfPinInputRemoveCurrent:
-        return zerofido_pin_status_message(zerofido_pin_length_status(text), error);
+        return zerofido_pin_length_ok(text, error);
     case ZfPinInputNone:
     default:
         return true;

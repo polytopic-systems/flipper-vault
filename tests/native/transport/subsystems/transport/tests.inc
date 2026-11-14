@@ -152,7 +152,7 @@ static void test_transport_processing_broadcast_init_recovers_channel(void) {
     test_reset();
     transport.processing = true;
     transport.cid = cid;
-    transport.cmd = ZF_CTAPHID_MSG;
+    transport.cmd = ZF_CTAPHID_CBOR;
     g_random_values[0] = 0x55667788U;
     g_random_count = 1;
 
@@ -165,7 +165,7 @@ static void test_transport_processing_broadcast_init_recovers_channel(void) {
     zf_transport_session_handle_packet(&app, &transport, packet, sizeof(packet), NULL);
 
     expect(g_last_hid_response[4] == ZF_CTAPHID_INIT,
-           "broadcast INIT should recover from a processing U2F transaction");
+           "broadcast INIT should recover from a processing CTAP2 transaction");
     expect(memcmp(&g_last_hid_response[7], nonce, sizeof(nonce)) == 0,
            "broadcast INIT recovery should echo the request nonce");
     memcpy(&assigned_cid, &g_last_hid_response[15], sizeof(assigned_cid));
@@ -355,29 +355,6 @@ static void test_wait_for_interaction_repeats_keepalive_on_timeout(void) {
            "interaction wait should use the keepalive interval as its timeout");
 }
 
-static void test_wait_for_interaction_omits_keepalive_for_u2f_msg(void) {
-    ZerofidoApp app = {0};
-    ZfTransportState transport = {0};
-    FuriSemaphore done = {0};
-    bool approved = false;
-
-    test_reset();
-    app.transport_state = &transport;
-    app.approval.done = &done;
-    app.approval.state = ZfApprovalApproved;
-    app.transport_adapter = &zf_transport_usb_hid_adapter;
-    transport.cmd = ZF_CTAPHID_MSG;
-    g_semaphore_results[0] = 1;
-    g_semaphore_results[1] = FuriStatusOk;
-    g_semaphore_result_count = 2;
-
-    expect(zf_transport_usb_hid_wait_for_interaction(&app, 0x01020304U, &approved),
-           "U2F MSG interaction wait should complete without keepalive");
-    expect(approved, "U2F MSG interaction wait should preserve approved result");
-    expect(g_hid_response_count == 0,
-           "U2F MSG approval wait should not interleave CTAPHID_KEEPALIVE frames");
-}
-
 static void test_transport_fragment_expires_on_session_tick(void) {
     ZerofidoApp app = {0};
     ZfTransportState transport = {0};
@@ -441,7 +418,7 @@ static void test_transport_request_wakeup_processes_one_complete_transaction(voi
            "the first queued packet should complete normally");
     expect(memcmp(&g_last_hid_response[7], nonce_a, sizeof(nonce_a)) == 0,
            "the first INIT response should echo the first queued request nonce");
-    expect(g_delay_ms_count == 0, "INIT responses should not use the U2F MSG response settle");
+    expect(g_delay_ms_count == 0, "INIT responses should be sent without a turn-around delay");
 }
 
 static void test_transport_request_without_wakeup_marks_connected_and_processes_packet(void) {
@@ -475,12 +452,17 @@ static void test_transport_request_without_wakeup_marks_connected_and_processes_
            "fallback request processing should echo the INIT nonce");
 }
 
-static void test_transport_worker_idle_poll_processes_immediate_u2f_invalid_cla(void) {
+/*
+ * Legacy U2F (CTAP1) was removed. INIT advertises CAPABILITY_NMSG, and a CTAPHID_MSG
+ * carrying a U2F APDU gets CTAPHID_ERROR ERR_INVALID_CMD on the same channel.
+ */
+static void test_transport_worker_rejects_ctaphid_msg_with_invalid_cmd(void) {
     ZerofidoApp app = {0};
     static const uint8_t nonce[8] = {0x1B, 0x61, 0x8C, 0x6B, 0xC8, 0xC7, 0x07, 0x42};
     const uint32_t broadcast_cid = ZF_BROADCAST_CID;
     const uint32_t cid = 0x9DD5F6E9U;
-    const uint8_t request[] = {0x6D, U2F_CMD_VERSION, 0x00, 0x00, 0x00, 0x00, 0x00};
+    /* U2F VERSION, then a U2F REGISTER header: both must be rejected the same way. */
+    static const uint8_t version_apdu[] = {0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00};
 
     test_reset();
     app.transport_adapter = &zf_transport_usb_hid_adapter;
@@ -500,9 +482,9 @@ static void test_transport_worker_idle_poll_processes_immediate_u2f_invalid_cla(
     memcpy(g_hid_request_packets[1], &cid, sizeof(cid));
     g_hid_request_packets[1][4] = ZF_CTAPHID_MSG;
     g_hid_request_packets[1][5] = 0x00;
-    g_hid_request_packets[1][6] = sizeof(request);
-    memcpy(&g_hid_request_packets[1][7], request, sizeof(request));
-    g_hid_request_packet_lens[1] = 7 + sizeof(request);
+    g_hid_request_packets[1][6] = sizeof(version_apdu);
+    memcpy(&g_hid_request_packets[1][7], version_apdu, sizeof(version_apdu));
+    g_hid_request_packet_lens[1] = 7 + sizeof(version_apdu);
     g_hid_request_count = 2;
 
     g_thread_flag_results[0] = FuriFlagErrorTimeout;
@@ -512,79 +494,45 @@ static void test_transport_worker_idle_poll_processes_immediate_u2f_invalid_cla(
 
     expect(zf_transport_usb_hid_worker(&app) == 0, "worker should exit cleanly in native harness");
     expect(g_hid_request_index == g_hid_request_count,
-           "idle polls should drain the queued INIT and immediate U2F MSG over separate passes");
-    expect(g_hid_response_count == 2,
-           "idle poll should answer both the INIT and invalid-CLA U2F MSG");
-    expect(g_last_hid_response_len == ZF_CTAPHID_PACKET_SIZE,
-           "invalid-CLA U2F MSG should emit a HID response frame");
+           "idle polls should drain the queued INIT and the CTAPHID_MSG");
+    expect(g_hid_response_count == 2, "INIT and the rejected CTAPHID_MSG should both be answered");
     expect(memcmp(g_last_hid_response, &cid, sizeof(cid)) == 0,
-           "invalid-CLA U2F MSG should reply on the assigned CID");
-    expect(g_last_hid_response[4] == ZF_CTAPHID_MSG,
-           "invalid-CLA U2F APDU should respond on CTAPHID_MSG");
-    expect(g_last_hid_response[5] == 0x00 && g_last_hid_response[6] == 0x02,
-           "invalid-CLA U2F APDU should return a two-byte status word");
-    expect(g_last_hid_response[7] == 0x6E && g_last_hid_response[8] == 0x00,
-           "invalid-CLA U2F APDU should return SW_CLA_NOT_SUPPORTED");
-    expect(g_delay_ms_count == 1 && g_last_delay_ms == 50U,
-           "U2F MSG responses should keep a USB turn-around settle before sending");
-    expect(g_last_thread_wait_timeout == ZF_WORKER_POLL_MS,
-           "worker should use a bounded poll timeout while idle");
+           "rejected CTAPHID_MSG should be answered on the assigned CID");
+    expect(g_last_hid_response[4] == ZF_CTAPHID_ERROR,
+           "CTAPHID_MSG should be answered with CTAPHID_ERROR");
+    expect(g_last_hid_response[5] == 0x00 && g_last_hid_response[6] == 0x01 &&
+               g_last_hid_response[7] == ZF_HID_ERR_INVALID_CMD,
+           "CTAPHID_MSG should fail with ERR_INVALID_CMD");
+    expect(g_delay_ms_count == 0, "rejecting CTAPHID_MSG should not add a turn-around delay");
+    expect(g_approval_request_count == 0, "rejected CTAPHID_MSG must not prompt the user");
 }
 
-static void test_transport_worker_idle_poll_processes_immediate_u2f_version_data(void) {
+static void test_transport_init_advertises_nmsg_and_cbor(void) {
     ZerofidoApp app = {0};
-    static const uint8_t nonce[8] = {0x36, 0xBB, 0x45, 0xBF, 0x98, 0xB6, 0x3C, 0xF0};
+    ZfTransportState transport = {0};
+    uint8_t packet[15] = {0};
+    static const uint8_t nonce[8] = {0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48};
     const uint32_t broadcast_cid = ZF_BROADCAST_CID;
-    const uint32_t cid = 0xF0EE7690U;
-    const uint8_t request[] = {
-        0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x22, 0x59, 0x38, 0xE9, 0x9C, 0xC9, 0x69, 0x5E,
-        0x75, 0x61, 0x77, 0xE6, 0x71, 0x37, 0xB5, 0x88, 0xD2, 0xE5, 0x4A, 0x5E, 0xCA, 0xEF,
-        0x4A, 0x29, 0x1E, 0x7B, 0xA1, 0x11, 0x5D, 0x0C, 0xA5, 0xE2, 0x70, 0xAD, 0x92,
-    };
 
     test_reset();
-    app.transport_adapter = &zf_transport_usb_hid_adapter;
     zf_runtime_config_load_defaults(&app.runtime_config);
     zf_runtime_config_resolve_capabilities(&app.runtime_config, &app.capabilities);
     app.capabilities_resolved = true;
-    g_random_values[0] = cid;
+    g_random_values[0] = 0x0BADCAFEU;
     g_random_count = 1;
+    memcpy(packet, &broadcast_cid, sizeof(broadcast_cid));
+    packet[4] = ZF_CTAPHID_INIT;
+    packet[6] = 0x08;
+    memcpy(&packet[7], nonce, sizeof(nonce));
 
-    memcpy(g_hid_request_packets[0], &broadcast_cid, sizeof(broadcast_cid));
-    g_hid_request_packets[0][4] = ZF_CTAPHID_INIT;
-    g_hid_request_packets[0][5] = 0x00;
-    g_hid_request_packets[0][6] = 0x08;
-    memcpy(&g_hid_request_packets[0][7], nonce, sizeof(nonce));
-    g_hid_request_packet_lens[0] = 15;
+    zf_transport_session_handle_packet(&app, &transport, packet, sizeof(packet), NULL);
 
-    memcpy(g_hid_request_packets[1], &cid, sizeof(cid));
-    g_hid_request_packets[1][4] = ZF_CTAPHID_MSG;
-    g_hid_request_packets[1][5] = 0x00;
-    g_hid_request_packets[1][6] = sizeof(request);
-    memcpy(&g_hid_request_packets[1][7], request, sizeof(request));
-    g_hid_request_packet_lens[1] = 7 + sizeof(request);
-    g_hid_request_count = 2;
-
-    g_thread_flag_results[0] = FuriFlagErrorTimeout;
-    g_thread_flag_results[1] = FuriFlagErrorTimeout;
-    g_thread_flag_results[2] = ZF_WORKER_EVT_STOP;
-    g_thread_flag_result_count = 3;
-
-    expect(zf_transport_usb_hid_worker(&app) == 0, "worker should exit cleanly in native harness");
-    expect(g_hid_request_index == g_hid_request_count,
-           "idle polls should drain the queued INIT and U2F VERSION-with-data MSG");
-    expect(g_hid_response_count == 2,
-           "idle poll should answer both the INIT and VERSION-with-data U2F MSG");
-    expect(g_last_hid_response_len == ZF_CTAPHID_PACKET_SIZE,
-           "VERSION-with-data U2F MSG should emit a HID response frame");
-    expect(memcmp(g_last_hid_response, &cid, sizeof(cid)) == 0,
-           "VERSION-with-data U2F MSG should reply on the assigned CID");
-    expect(g_last_hid_response[4] == ZF_CTAPHID_MSG,
-           "VERSION-with-data U2F APDU should respond on CTAPHID_MSG");
-    expect(g_last_hid_response[5] == 0x00 && g_last_hid_response[6] == 0x02,
-           "VERSION-with-data U2F APDU should return a two-byte status word");
-    expect(g_last_hid_response[7] == 0x67 && g_last_hid_response[8] == 0x00,
-           "VERSION-with-data U2F APDU should return SW_WRONG_LENGTH");
+    expect(g_last_hid_response[4] == ZF_CTAPHID_INIT && g_last_hid_response[6] == 17,
+           "INIT should answer with the 17-byte INIT response");
+    expect((g_last_hid_response[7 + 16] & ZF_CAPABILITY_NMSG) != 0,
+           "INIT must advertise CAPABILITY_NMSG: CTAPHID_MSG (CTAP1/U2F) is not implemented");
+    expect((g_last_hid_response[7 + 16] & ZF_CAPABILITY_CBOR) != 0,
+           "INIT must advertise CAPABILITY_CBOR");
 }
 
 static void test_transport_request_wakeup_invalid_seq_allows_followup_init(void) {
@@ -1059,114 +1007,4 @@ static void test_transport_dispatch_cbor_preserves_response_buffer(void) {
            "GetInfo should return the stub CTAP payload length");
     expect(g_last_hid_response[7] == ZF_CTAP_SUCCESS,
            "GetInfo should return a CTAP success status byte");
-}
-
-static void test_transport_dispatch_u2f_version_with_data_returns_wrong_length(void) {
-    ZerofidoApp app = {0};
-    ZfTransportState transport = {0};
-    const uint32_t cid = 0x01020304U;
-    uint8_t request[5 + 64] = {0};
-
-    test_reset();
-    app.transport_adapter = &zf_transport_usb_hid_adapter;
-    zf_runtime_config_load_defaults(&app.runtime_config);
-    zf_runtime_config_resolve_capabilities(&app.runtime_config, &app.capabilities);
-    app.capabilities_resolved = true;
-
-    expect(zf_u2f_adapter_init(&app), "U2F init should succeed before transport MSG test");
-
-    request[0] = 0x00;
-    request[1] = U2F_CMD_VERSION;
-    request[2] = 0x00;
-    request[3] = 0x00;
-    request[4] = 64;
-    memset(&request[5], 0xA5, 64);
-
-    zf_transport_dispatch_complete_message(&app, &transport, cid, ZfTransportProtocolKindU2f,
-                                           request, sizeof(request));
-
-    expect(g_last_hid_response_len == ZF_CTAPHID_PACKET_SIZE,
-           "invalid VERSION APDU should emit a HID response frame");
-    expect(memcmp(g_last_hid_response, &cid, sizeof(cid)) == 0,
-           "invalid VERSION APDU should reply on the request CID");
-    expect(g_last_hid_response[4] == ZF_CTAPHID_MSG,
-           "invalid VERSION APDU should still respond on CTAPHID_MSG");
-    expect(g_last_hid_response[5] == 0x00 && g_last_hid_response[6] == 0x02,
-           "invalid VERSION APDU should return a two-byte status word");
-    expect(g_last_hid_response[7] == 0x67 && g_last_hid_response[8] == 0x00,
-           "invalid VERSION APDU should return SW_WRONG_LENGTH");
-
-    zf_u2f_adapter_deinit(&app);
-}
-
-static void
-test_transport_dispatch_u2f_version_extended_length_with_data_returns_wrong_length(void) {
-    ZerofidoApp app = {0};
-    ZfTransportState transport = {0};
-    const uint32_t cid = 0x01020304U;
-    uint8_t request[] = {
-        0x00, 0x03, 0x00, 0x00, 0x00, 0x28, 0x2c, 0x7c, 0xd7, 0xb3, 0x5e, 0x16,
-        0xfa, 0x3c, 0xc2, 0x57, 0xb0, 0x5e, 0xaf, 0xa7, 0xc7, 0xcc, 0x77, 0x92,
-        0xf1, 0xef, 0x37, 0xe3, 0x1b, 0x1e, 0x4c, 0x77, 0x38, 0xac, 0x41, 0x08,
-        0x44, 0x3b, 0x4a, 0x46, 0x72, 0x2d, 0xee, 0x2b, 0xea, 0x32, 0x00, 0x00,
-    };
-
-    test_reset();
-    app.transport_adapter = &zf_transport_usb_hid_adapter;
-    zf_runtime_config_load_defaults(&app.runtime_config);
-    zf_runtime_config_resolve_capabilities(&app.runtime_config, &app.capabilities);
-    app.capabilities_resolved = true;
-    expect(zf_u2f_adapter_init(&app),
-           "transport extended-length invalid VERSION test should initialize U2F");
-
-    zf_transport_dispatch_complete_message(&app, &transport, cid, ZfTransportProtocolKindU2f,
-                                           request, sizeof(request));
-
-    expect(g_last_hid_response_len == ZF_CTAPHID_PACKET_SIZE,
-           "extended-length invalid VERSION APDU should emit a HID response frame");
-    expect(memcmp(g_last_hid_response, &cid, sizeof(cid)) == 0,
-           "extended-length invalid VERSION APDU should reply on the request CID");
-    expect(g_last_hid_response[4] == ZF_CTAPHID_MSG,
-           "extended-length invalid VERSION APDU should still respond on CTAPHID_MSG");
-    expect(g_last_hid_response[5] == 0x00 && g_last_hid_response[6] == 0x02,
-           "extended-length invalid VERSION APDU should return a two-byte status word");
-    expect(g_last_hid_response[7] == 0x67 && g_last_hid_response[8] == 0x00,
-           "extended-length invalid VERSION APDU should return SW_WRONG_LENGTH");
-
-    zf_u2f_adapter_deinit(&app);
-}
-
-static void test_transport_dispatch_u2f_version_without_live_backend_returns_version(void) {
-    ZerofidoApp app = {0};
-    ZfTransportState transport = {0};
-    const uint32_t cid = 0x01020304U;
-    uint8_t request[5] = {0};
-
-    test_reset();
-    app.transport_adapter = &zf_transport_usb_hid_adapter;
-    zf_runtime_config_load_defaults(&app.runtime_config);
-    zf_runtime_config_resolve_capabilities(&app.runtime_config, &app.capabilities);
-    app.capabilities_resolved = true;
-
-    request[0] = 0x00;
-    request[1] = U2F_CMD_VERSION;
-    request[2] = 0x00;
-    request[3] = 0x00;
-    request[4] = 0x00;
-
-    zf_transport_dispatch_complete_message(&app, &transport, cid, ZfTransportProtocolKindU2f,
-                                           request, sizeof(request));
-
-    expect(g_last_hid_response_len == ZF_CTAPHID_PACKET_SIZE,
-           "VERSION APDU without live backend should emit a HID response frame");
-    expect(memcmp(g_last_hid_response, &cid, sizeof(cid)) == 0,
-           "VERSION APDU without live backend should reply on the request CID");
-    expect(g_last_hid_response[4] == ZF_CTAPHID_MSG,
-           "VERSION APDU without live backend should still respond on CTAPHID_MSG");
-    expect(g_last_hid_response[5] == 0x00 && g_last_hid_response[6] == 0x08,
-           "VERSION APDU without live backend should return an 8-byte payload");
-    expect(memcmp(&g_last_hid_response[7], "U2F_V2", 6) == 0,
-           "VERSION APDU without live backend should return U2F_V2");
-    expect(g_last_hid_response[13] == 0x90 && g_last_hid_response[14] == 0x00,
-           "VERSION APDU without live backend should return SW_NO_ERROR");
 }

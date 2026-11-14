@@ -24,7 +24,7 @@
 #include "nfc_worker.h"
 
 /*
- * APDU dispatch validates SELECT/CTAP/U2F/NDEF traffic and queues protocol work
+ * APDU dispatch validates SELECT/CTAP/NDEF traffic and queues protocol work
  * for the NFC worker when a request cannot be answered immediately.
  */
 bool zf_transport_nfc_handle_apdu(ZerofidoApp *app, ZfNfcTransportState *state,

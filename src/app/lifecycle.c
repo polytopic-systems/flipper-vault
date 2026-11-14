@@ -25,7 +25,6 @@
 #elif defined(ZF_NFC_ONLY)
 #include "../transport/nfc_worker.h"
 #endif
-#include "../u2f/adapter.h"
 #include "../zerofido_attestation.h"
 #include "../zerofido_crypto.h"
 #include "../zerofido_notify.h"
@@ -151,13 +150,6 @@ static ZfStorageInitStatus zf_app_lifecycle_init_storage(ZerofidoApp *app) {
         }
     }
 #endif
-    if (capabilities.u2f_enabled) {
-        zerofido_ui_set_status(app, "U2F keys");
-        if (!zf_u2f_adapter_init(app)) {
-            zf_telemetry_log("u2f key prewarm failed");
-        }
-    }
-
     return ZfStorageInitOk;
 }
 
@@ -187,24 +179,12 @@ static void zf_app_lifecycle_load_runtime_config(ZerofidoApp *app) {
 #endif
 }
 
-static const char *zf_app_lifecycle_backend_status(const ZerofidoApp *app,
-                                                   ZfStorageInitStatus storage_status,
-                                                   bool u2f_ready) {
-    ZfResolvedCapabilities capabilities;
-    bool transport_usable = false;
-
-    zf_runtime_get_effective_capabilities(app, &capabilities);
-    transport_usable = (capabilities.fido2_enabled || !capabilities.u2f_enabled || u2f_ready);
-    if (storage_status == ZfStorageInitOk && transport_usable) {
+static const char *zf_app_lifecycle_backend_status(ZfStorageInitStatus storage_status) {
+    if (storage_status == ZfStorageInitOk) {
         return NULL;
     }
-    if (storage_status == ZfStorageInitInvalidPinState) {
-        return "PIN state invalid";
-    }
-    if (storage_status != ZfStorageInitOk && !u2f_ready) {
-        return "Backend init failed";
-    }
-    return storage_status == ZfStorageInitOk ? "U2F unavailable" : "Storage init failed";
+    return storage_status == ZfStorageInitInvalidPinState ? "PIN state invalid"
+                                                          : "Storage init failed";
 }
 
 static bool zf_app_lifecycle_start_worker(ZerofidoApp *app) {
@@ -320,8 +300,7 @@ bool zf_app_lifecycle_startup(ZerofidoApp *app) {
 
     zerofido_ui_set_status(app, "Storage");
     ZfStorageInitStatus storage_status = zf_app_lifecycle_init_storage(app);
-    bool u2f_ready = !app->capabilities.u2f_enabled || zf_u2f_adapter_is_available(app);
-    const char *backend_status = zf_app_lifecycle_backend_status(app, storage_status, u2f_ready);
+    const char *backend_status = zf_app_lifecycle_backend_status(storage_status);
 
     if (backend_status) {
         app->startup_reset_available = storage_status == ZfStorageInitInvalidPinState;
@@ -425,8 +404,8 @@ bool zf_app_lifecycle_startup_pending(ZerofidoApp *app) {
         completed_thread = app->startup_thread;
         app->startup_thread = NULL;
         completed_ok = app->startup_ok;
-        start_transport = completed_ok && app->running && !app->worker_thread &&
-                          (app->capabilities.fido2_enabled || app->capabilities.u2f_enabled);
+        start_transport =
+            completed_ok && app->running && !app->worker_thread && app->capabilities.fido2_enabled;
     } else {
         pending = app->startup_thread != NULL;
     }
@@ -466,7 +445,7 @@ bool zf_app_lifecycle_restart_transport(ZerofidoApp *app) {
 #if !defined(ZF_USB_ONLY) && !defined(ZF_NFC_ONLY)
     app->transport_adapter = zf_app_lifecycle_adapter_for_mode(app->runtime_config.transport_mode);
 #endif
-    if (!(app->capabilities.fido2_enabled || app->capabilities.u2f_enabled)) {
+    if (!app->capabilities.fido2_enabled) {
         return true;
     }
 
@@ -529,7 +508,6 @@ void zf_app_lifecycle_free(ZerofidoApp *app) {
 
     ZfCredentialIndexEntry *owned_records = app->store_records_owned ? app->store.records : NULL;
 
-    zf_u2f_adapter_deinit(app);
     zf_store_deinit(&app->store);
     if (owned_records) {
         zf_crypto_secure_zero(owned_records, sizeof(owned_records[0]) * app->store.capacity);

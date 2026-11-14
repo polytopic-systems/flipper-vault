@@ -44,7 +44,8 @@ mobile-app serial profile) and restores it when the transport stops or the app e
 | fidoServiceRevisionBitfield | `F1D0FFF4-DEAA-ECEE-B42F-C9BA7ED623BB` | read, write | encrypted + authenticated |
 
 The revision bitfield offers `0x20` (FIDO2) only: MSG payloads are CTAP2 (command byte + CBOR) and
-go to the same CTAP2 dispatcher USB uses. U2F/CTAP1 over Bluetooth is not routed.
+go to the same CTAP2 dispatcher USB uses. Legacy U2F (CTAP1) is not supported on any transport: a
+CTAP1 APDU in a MSG frame gets `CTAP1_ERR_INVALID_COMMAND`.
 
 ## Framing and limits
 

@@ -114,8 +114,8 @@ static uint8_t zf_client_pin_request_permission_token_consent(
     }
     furi_mutex_release(app->ui_mutex);
 
-    if (!zerofido_ui_request_approval(app, ZfUiProtocolFido2, "Authorize", target_id,
-                                      "Approve PIN use", session_id, &approved)) {
+    if (!zerofido_ui_request_approval(app, "Authorize", target_id, "Approve PIN use", session_id,
+                                      &approved)) {
         status = ZF_CTAP_ERR_USER_ACTION_TIMEOUT;
     } else if (!approved) {
         status =
@@ -333,6 +333,9 @@ uint8_t zf_client_pin_handle_get_pin_token(
     size_t encrypted_token_len = 0;
     uint8_t status = ZF_CTAP_SUCCESS;
 
+    /* Permission-scoped tokens and their local consent are CTAP 2.1 (ZF_DEV_FIDO2_1) only. */
+    permissions_mode = ZF_DEV_FIDO2_1 && permissions_mode;
+    require_local_consent = ZF_DEV_FIDO2_1 && require_local_consent;
     status = zf_client_pin_require_existing_pin(state);
     if (status != ZF_CTAP_SUCCESS) {
         return status;

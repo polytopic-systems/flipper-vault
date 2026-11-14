@@ -15,6 +15,8 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+/* This translation unit owns the out-of-line arena/scratch helpers. */
+#define ZF_APP_HELPERS_IMPL 1
 #include "zerofido_app.h"
 
 #include "app/lifecycle.h"

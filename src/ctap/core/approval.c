@@ -42,8 +42,7 @@ static uint8_t zf_ctap_status_from_interaction_state(ZfApprovalState state,
 uint8_t zf_ctap_request_approval(ZerofidoApp *app, const char *operation, const char *rp_id,
                                  const char *user_text, ZfTransportSessionId session_id) {
     bool approved = false;
-    if (!zerofido_ui_request_approval(app, ZfUiProtocolFido2, operation, rp_id, user_text,
-                                      session_id, &approved)) {
+    if (!zerofido_ui_request_approval(app, operation, rp_id, user_text, session_id, &approved)) {
         return ZF_CTAP_ERR_USER_ACTION_TIMEOUT;
     }
     if (approved) {

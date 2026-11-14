@@ -29,8 +29,6 @@
 #include "policy.h"
 #include "response.h"
 #include "../transport/adapter.h"
-#include "../u2f/adapter.h"
-#include "../u2f/persistence.h"
 #include "../zerofido_app_i.h"
 #include "../zerofido_crypto.h"
 #include "../zerofido_notify.h"
@@ -47,6 +45,8 @@
     } while (false)
 #endif
 
+/* authenticatorSelection is CTAP 2.1: built only for ZF_DEV_FIDO2_1. */
+#if ZF_DEV_FIDO2_1
 static uint8_t zf_handle_selection(ZerofidoApp *app, ZfTransportSessionId session_id,
                                    size_t request_len, size_t *out_len) {
     uint8_t status = zf_ctap_require_empty_payload(request_len);
@@ -63,6 +63,7 @@ static uint8_t zf_handle_selection(ZerofidoApp *app, ZfTransportSessionId sessio
     *out_len = 0;
     return ZF_CTAP_SUCCESS;
 }
+#endif
 
 /*
  * CTAP command router. GetInfo is read-only; ClientPIN, reset,
@@ -88,14 +89,11 @@ uint8_t zf_ctap_dispatch_command(ZerofidoApp *app, const ZfResolvedCapabilities 
         }
         pin_is_set = zf_ctap_pin_is_set(app);
 #if ZF_USB_DIAGNOSTICS
-        zf_usb_diag_logf(app->storage,
-                         "gi caps pin=%u token=%u proto2=%u f21=%u mcuvnr=%u u2f=%u",
-                         pin_is_set ? 1U : 0U,
-                         capabilities->pin_uv_auth_token_enabled ? 1U : 0U,
+        zf_usb_diag_logf(app->storage, "gi caps pin=%u token=%u proto2=%u f21=%u mcuvnr=%u",
+                         pin_is_set ? 1U : 0U, capabilities->pin_uv_auth_token_enabled ? 1U : 0U,
                          capabilities->pin_uv_auth_protocol_2_enabled ? 1U : 0U,
                          capabilities->advertise_fido_2_1 ? 1U : 0U,
-                         capabilities->make_cred_uv_not_required ? 1U : 0U,
-                         capabilities->advertise_u2f_v2 ? 1U : 0U);
+                         capabilities->make_cred_uv_not_required ? 1U : 0U);
 #endif
         status = zf_ctap_build_get_info_response(capabilities, pin_is_set, response_body,
                                                  response_body_capacity, response_body_len);
@@ -157,6 +155,7 @@ uint8_t zf_ctap_dispatch_command(ZerofidoApp *app, const ZfResolvedCapabilities 
         status = zf_ctap_assertion_queue_handle_next(app, session_id, response_body,
                                                      response_body_capacity, response_body_len);
         break;
+#if ZF_DEV_FIDO2_1
     case ZfCtapeCmdSelection:
         status = zf_ctap_dispatch_require_idle(app);
         if (status != ZF_CTAP_SUCCESS) {
@@ -164,6 +163,7 @@ uint8_t zf_ctap_dispatch_command(ZerofidoApp *app, const ZfResolvedCapabilities 
         }
         status = zf_handle_selection(app, session_id, request_body_len + 1U, response_body_len);
         break;
+#endif
     default:
         *response_body_len = 0;
         break;

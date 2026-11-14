@@ -208,7 +208,7 @@ class ConformanceSuiteTests(unittest.TestCase):
     def test_validate_get_info_response_accepts_experimental_2_1_options_when_metadata_matches(self) -> None:
         service = ConformanceSuiteService()
         metadata = service._load_static_metadata()
-        metadata["authenticatorGetInfo"]["versions"] = ["FIDO_2_1", "FIDO_2_0", "U2F_V2"]
+        metadata["authenticatorGetInfo"]["versions"] = ["FIDO_2_1", "FIDO_2_0"]
         metadata["authenticatorGetInfo"]["options"]["pinUvAuthToken"] = True
         metadata["authenticatorGetInfo"]["options"]["makeCredUvNotRqd"] = True
         metadata["authenticatorGetInfo"]["options"]["clientPin"] = True

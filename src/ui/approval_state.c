@@ -192,8 +192,8 @@ void zerofido_ui_approval_service(ZerofidoApp *app) {
 }
 
 static void zerofido_ui_prepare_interaction_locked(ZerofidoApp *app, ZfInteractionKind kind,
-                                                   ZfUiProtocol protocol, const char *operation,
-                                                   const char *target_id, const char *user_text) {
+                                                   const char *operation, const char *target_id,
+                                                   const char *user_text) {
     /*
      * generation and pending_hide_generation keep delayed hide events from
      * closing a newer prompt that reused the same view.
@@ -209,12 +209,9 @@ static void zerofido_ui_prepare_interaction_locked(ZerofidoApp *app, ZfInteracti
     memset(&app->approval.details, 0, sizeof(app->approval.details));
 
     if (kind == ZfInteractionKindApproval) {
-        app->approval.details.approval.protocol = protocol;
-        zf_ui_format_approval_header(app->approval.details.approval.operation,
-                                     sizeof(app->approval.details.approval.operation), protocol,
-                                     operation);
-        app->approval.details.approval
-            .operation[sizeof(app->approval.details.approval.operation) - 1] = '\0';
+        /* Operations arrive as display headers ("Create passkey", "Use passkey", ...). */
+        scene_copy(app->approval.details.approval.operation,
+                   sizeof(app->approval.details.approval.operation), operation);
         strncpy(app->approval.details.approval.user_text, user_text ? user_text : "",
                 sizeof(app->approval.details.approval.user_text) - 1);
         app->approval.details.approval
@@ -253,9 +250,9 @@ static bool zerofido_ui_wait_for_interaction_result(ZerofidoApp *app,
  * interaction reached a terminal state; approved separately says whether that
  * terminal state was approval.
  */
-bool zerofido_ui_request_approval(ZerofidoApp *app, ZfUiProtocol protocol, const char *operation,
-                                  const char *target_id, const char *user_text,
-                                  ZfTransportSessionId current_session_id, bool *approved) {
+bool zerofido_ui_request_approval(ZerofidoApp *app, const char *operation, const char *target_id,
+                                  const char *user_text, ZfTransportSessionId current_session_id,
+                                  bool *approved) {
 #if ZF_AUTO_ACCEPT_REQUESTS
     ZfResolvedCapabilities capabilities;
 #endif
@@ -281,8 +278,8 @@ bool zerofido_ui_request_approval(ZerofidoApp *app, ZfUiProtocol protocol, const
         }
         return true;
     }
-    zerofido_ui_prepare_interaction_locked(app, ZfInteractionKindApproval, protocol, operation,
-                                           target_id, user_text);
+    zerofido_ui_prepare_interaction_locked(app, ZfInteractionKindApproval, operation, target_id,
+                                           user_text);
     zerofido_ui_clear_interaction_signal(app);
     furi_mutex_release(app->ui_mutex);
 
@@ -308,8 +305,7 @@ bool zerofido_ui_request_assertion_selection(ZerofidoApp *app, const char *rp_id
     }
 
     zerofido_ui_prepare_interaction_locked(app, ZfInteractionKindAssertionSelection,
-                                           ZfUiProtocolFido2, "Select account", rp_id,
-                                           "Choose account");
+                                           "Select account", rp_id, "Choose account");
     app->approval.details.selection.credential_count = (uint8_t)match_count;
     for (size_t i = 0; i < match_count; ++i) {
         app->approval.details.selection.credential_indices[i] = match_indices[i];
@@ -341,7 +337,6 @@ void zerofido_ui_show_interaction(ZerofidoApp *app) {
         const char *user = app->approval.details.approval.user_text;
         if (strncmp(user, "User: ", 6) == 0)
             user += 6;
-        scene.u2f = app->approval.details.approval.protocol == ZfUiProtocolU2f;
         scene.deadline = app->approval.deadline;
         scene_copy(scene.header, sizeof(scene.header), app->approval.details.approval.operation);
         scene_copy(scene.site, sizeof(scene.site),

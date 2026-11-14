@@ -29,8 +29,8 @@ const uint8_t zf_transport_nfc_ndef_aid[ZF_NFC_NDEF_AID_LEN] = {
     0xD2, 0x76, 0x00, 0x00, 0x85, 0x01, 0x01,
 };
 
-const uint8_t zf_transport_nfc_select_response[6] = {'U', '2', 'F', '_', 'V', '2'};
-const uint8_t zf_transport_nfc_fido2_select_response[8] = {'F', 'I', 'D', 'O', '_', '2', '_', '0'};
+/* A FIDO2-only authenticator answers SELECT with "FIDO_2_0" (CTAP 2.x, NFC applet selection). */
+const uint8_t zf_transport_nfc_select_response[8] = {'F', 'I', 'D', 'O', '_', '2', '_', '0'};
 
 size_t zf_transport_nfc_normalize_le(const ZfNfcApdu *apdu) {
     if (!apdu || !apdu->has_le || apdu->le == 0) {
@@ -146,42 +146,6 @@ bool zf_transport_nfc_parse_apdu(const uint8_t *buffer, size_t buffer_len, ZfNfc
 uint16_t zf_transport_nfc_status_update_sw(size_t remaining) {
     return remaining > 0xFFU ? ZF_NFC_SW_BYTES_REMAINING
                              : (uint16_t)(ZF_NFC_SW_BYTES_REMAINING | remaining);
-}
-
-size_t zf_transport_nfc_encode_u2f_request(const ZfNfcApdu *apdu, uint8_t *out,
-                                           size_t out_capacity) {
-    size_t offset = 4;
-
-    if (!apdu || !out || out_capacity < 4U) {
-        return 0;
-    }
-
-    out[0] = 0x00;
-    out[1] = apdu->ins;
-    out[2] = apdu->p1;
-    out[3] = apdu->p2;
-
-    if (apdu->data_len == 0) {
-        return 4;
-    }
-
-    if (!apdu->extended) {
-        if (out_capacity < 5U + apdu->data_len || apdu->data_len > 0xFFU) {
-            return 0;
-        }
-        out[offset++] = (uint8_t)apdu->data_len;
-    } else {
-        if (out_capacity < 7U + apdu->data_len || apdu->data_len > 0xFFFFU) {
-            return 0;
-        }
-        out[offset++] = 0x00;
-        out[offset++] = (uint8_t)(apdu->data_len >> 8);
-        out[offset++] = (uint8_t)apdu->data_len;
-    }
-
-    memmove(&out[offset], apdu->data, apdu->data_len);
-    offset += apdu->data_len;
-    return offset;
 }
 
 #endif

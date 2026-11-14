@@ -118,31 +118,6 @@ void zf_ui_format_passkey_title(const ZfCredentialRecord *record, char *out, siz
     }
 }
 
-void zf_ui_format_approval_header(char *out, size_t out_size, ZfUiProtocol protocol,
-                                  const char *operation) {
-    if (protocol == ZfUiProtocolFido2) {
-        if (operation && strcmp(operation, "Register") == 0) {
-            snprintf(out, out_size, "Create passkey");
-        } else if (operation && strcmp(operation, "Authenticate") == 0) {
-            snprintf(out, out_size, "Use passkey");
-        } else if (operation && strcmp(operation, "Reset") == 0) {
-            snprintf(out, out_size, "Reset ZeroFIDO");
-        } else {
-            snprintf(out, out_size, "%s", operation ? operation : "Approve request");
-        }
-        return;
-    }
-
-    snprintf(out, out_size, "U2F %s", operation ? operation : "Request");
-}
-
-void zf_ui_format_approval_body(char *out, size_t out_size, ZfUiProtocol protocol,
-                                const char *target_id, const char *user_text) {
-    snprintf(out, out_size, "%s: %.60s\n%.40s", protocol == ZfUiProtocolU2f ? "App" : "Website",
-             (target_id && target_id[0]) ? target_id : "(unknown)",
-             (user_text && user_text[0]) ? user_text : "User: (not provided)");
-}
-
 void zf_ui_format_assertion_selection_index_label(const ZfCredentialIndexEntry *entry, char *out,
                                                   size_t out_size) {
     char title[72];

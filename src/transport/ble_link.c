@@ -40,6 +40,14 @@
 #include "../zerofido_types.h"
 
 #define TAG "VaultBle"
+/* Info/warning traces are diagnostics-only; errors are always logged. */
+#if ZF_RELEASE_DIAGNOSTICS
+#define ZF_BLE_LOG_I(...) ZF_BLE_LOG_I(__VA_ARGS__)
+#define ZF_BLE_LOG_W(...) ZF_BLE_LOG_W(__VA_ARGS__)
+#else
+#define ZF_BLE_LOG_I(...) ((void)0)
+#define ZF_BLE_LOG_W(...) ((void)0)
+#endif
 
 /* Bonds made with this profile live in the app's own data folder. */
 #define ZF_BLE_KEYS_PATH ZF_APP_DATA_DIR "/.ble_fido.keys"
@@ -373,7 +381,7 @@ static void zf_ble_write_control_point_length(ZfBleLink *link, uint16_t fragment
     /* ble_gatt_characteristic_update() returns true on failure. */
     if (ble_gatt_characteristic_update(link->svc_handle, &link->chars[ZfBleCharControlPointLength],
                                        value)) {
-        FURI_LOG_W(TAG, "cpLength update failed");
+        ZF_BLE_LOG_W("cpLength update failed");
     }
 }
 
@@ -400,7 +408,7 @@ static FuriHalBleProfileBase *zf_ble_profile_start(FuriHalBleProfileParams param
         zf_ble_write_control_point_length(link, ZF_BLE_FRAGMENT_MIN);
         if (ble_gatt_characteristic_update(link->svc_handle,
                                            &link->chars[ZfBleCharRevisionBitfield], &revision)) {
-            FURI_LOG_W(TAG, "revision update failed");
+            ZF_BLE_LOG_W("revision update failed");
         }
         link->gatt_ready = true;
     } else {
@@ -514,7 +522,7 @@ ZfBleLink *zf_ble_link_start(FuriThreadId worker) {
     furi_mutex_release(link->mutex);
     bt_set_status_changed_callback(link->bt, zf_ble_bt_status_callback, link);
     furi_hal_bt_start_advertising();
-    FURI_LOG_I(TAG, "FIDO profile up");
+    ZF_BLE_LOG_I("FIDO profile up");
     return link;
 }
 
@@ -538,7 +546,7 @@ void zf_ble_link_stop(ZfBleLink *link) {
         FURI_LOG_E(TAG, "default profile restore failed");
     }
     furi_record_close(RECORD_BT);
-    FURI_LOG_I(TAG, "default profile restored");
+    ZF_BLE_LOG_I("default profile restored");
 
     furi_mutex_acquire(link->mutex, FuriWaitForever);
     zf_ble_rx_reset(&link->rx);

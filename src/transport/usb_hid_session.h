@@ -47,6 +47,8 @@ typedef struct ZerofidoApp ZerofidoApp;
 
 #define ZF_CAPABILITY_WINK 0x01
 #define ZF_CAPABILITY_CBOR 0x04
+/* CTAPHID_MSG (CTAP1/U2F) is not implemented. */
+#define ZF_CAPABILITY_NMSG 0x08
 #define ZF_BROADCAST_CID 0xFFFFFFFFUL
 #define ZF_RESERVED_CID 0x00000000UL
 #define ZF_MAX_ALLOCATED_CIDS 32

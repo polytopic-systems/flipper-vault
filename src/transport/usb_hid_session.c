@@ -24,11 +24,8 @@
 #include <string.h>
 
 #include "dispatch.h"
-#include "../u2f/apdu.h"
 #include "../zerofido_app_i.h"
 #include "../zerofido_crypto.h"
-
-#define ZF_U2F_HID_RESPONSE_SETTLE_MS 50U
 
 static void zf_transport_handle_init(uint32_t response_cid, uint32_t assigned_cid,
                                      const uint8_t *payload, size_t payload_len,
@@ -154,32 +151,6 @@ static void zf_transport_add_action(uint32_t *actions, uint32_t action) {
     }
 }
 
-static bool zf_transport_try_send_u2f_validation_error(const ZerofidoApp *app,
-                                                       ZfTransportState *transport) {
-    ZfResolvedCapabilities capabilities;
-    uint8_t status[2] = {0};
-    uint16_t status_len = 0;
-
-    if (!app || !transport || transport->cmd != ZF_CTAPHID_MSG) {
-        return false;
-    }
-
-    zf_runtime_get_effective_capabilities(app, &capabilities);
-    if (!capabilities.u2f_enabled) {
-        return false;
-    }
-
-    status_len = u2f_validate_request_into_response(transport->payload, transport->total_len,
-                                                    status, sizeof(status));
-    if (status_len == 0) {
-        return false;
-    }
-
-    zf_transport_session_send_frames(transport->cid, ZF_CTAPHID_MSG, status, status_len);
-    zf_transport_session_reset(transport);
-    return true;
-}
-
 void zf_transport_session_attach_arena(ZfTransportState *transport, uint8_t *payload,
                                        size_t payload_capacity) {
     if (!transport) {
@@ -264,15 +235,6 @@ void zf_transport_session_send_frames(uint32_t cid, uint8_t cmd, const uint8_t *
     size_t chunk = 0;
     size_t offset = 0;
 
-    /*
-     * U2F conformance meta tests can produce immediate two-byte MSG responses.
-     * Give the Flipper U2F HAL a small turn-around window before queueing the IN report; otherwise
-     * the HAL can silently miss the response under fast host OUT->IN traffic.
-     */
-    if (cmd == ZF_CTAPHID_MSG) {
-        furi_delay_ms(ZF_U2F_HID_RESPONSE_SETTLE_MS);
-    }
-
     memset(packet, 0, sizeof(packet));
     memcpy(packet, &cid, sizeof(cid));
     packet[4] = cmd;
@@ -341,6 +303,8 @@ static void zf_transport_handle_init(uint32_t response_cid, uint32_t assigned_ci
     if (capabilities && capabilities->fido2_enabled) {
         capability_flags |= ZF_CAPABILITY_CBOR;
     }
+    /* Legacy U2F (CTAP1) was removed: CTAPHID_MSG gets ERR_INVALID_CMD. */
+    capability_flags |= ZF_CAPABILITY_NMSG;
     response[16] = capability_flags;
     zf_transport_session_send_frames(response_cid, ZF_CTAPHID_INIT, response, sizeof(response));
 }
@@ -454,16 +418,10 @@ static void zf_transport_complete_if_ready(ZerofidoApp *app, ZfTransportState *t
     }
 
     transport->active = false;
-    if (zf_transport_try_send_u2f_validation_error(app, transport)) {
-        return;
-    }
 
     switch (transport->cmd) {
     case ZF_CTAPHID_PING:
         protocol = ZfTransportProtocolKindPing;
-        break;
-    case ZF_CTAPHID_MSG:
-        protocol = ZfTransportProtocolKindU2f;
         break;
     case ZF_CTAPHID_WINK:
         protocol = ZfTransportProtocolKindWink;
@@ -489,7 +447,6 @@ static bool zf_transport_validate_command_length(uint32_t cid, uint8_t cmd, uint
     bool valid = true;
 
     switch (cmd) {
-    case ZF_CTAPHID_MSG:
     case ZF_CTAPHID_CBOR:
         valid = msg_len > 0;
         break;
