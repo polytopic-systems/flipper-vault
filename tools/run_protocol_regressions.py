@@ -19,6 +19,7 @@ NATIVE_BLE_SOURCE = ROOT / "tests" / "native" / "ble" / "runner.c"
 NATIVE_INCLUDE = ROOT / "tests" / "native" / "include"
 NATIVE_BINARY = ROOT / ".tmp" / "native_protocol_regressions"
 NATIVE_PACKED_OFF_BINARY = ROOT / ".tmp" / "native_protocol_regressions_packed_off"
+NATIVE_BLE_PROTOCOL_BINARY = ROOT / ".tmp" / "native_protocol_regressions_ble"
 NATIVE_TRANSPORT_BINARY = ROOT / ".tmp" / "native_transport_u2f_regressions"
 NATIVE_CRYPTO_BINARY = ROOT / ".tmp" / "native_crypto_regressions"
 NATIVE_BLE_BINARY = ROOT / ".tmp" / "native_ble_framing_regressions"
@@ -114,6 +115,26 @@ def main() -> None:
         ]
     )
     run([str(NATIVE_PACKED_OFF_BINARY)])
+    run(
+        [
+            compiler,
+            "-std=c11",
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            "-DZF_HOST_TEST",
+            "-DZF_RELEASE_DIAGNOSTICS=1",
+            "-DZF_BLE_ENABLED=1",
+            "-I",
+            str(NATIVE_INCLUDE),
+            "-I",
+            str(ROOT / "src"),
+            str(NATIVE_SOURCE),
+            "-o",
+            str(NATIVE_BLE_PROTOCOL_BINARY),
+        ]
+    )
+    run([str(NATIVE_BLE_PROTOCOL_BINARY)])
     run(
         [
             compiler,

@@ -102,6 +102,10 @@ void zf_runtime_config_resolve_capabilities(const ZfRuntimeConfig *config,
 void zf_runtime_get_effective_capabilities(const ZerofidoApp *app,
                                            ZfResolvedCapabilities *capabilities);
 bool zf_runtime_ctap_command_enabled(const ZerofidoApp *app, uint8_t cmd);
+/* Settings cycle: USB HID -> NFC -> Bluetooth -> USB HID, skipping modes this build lacks. */
+ZfTransportMode zf_runtime_config_next_transport_mode(ZfTransportMode mode);
 const char *zf_transport_mode_name(ZfTransportMode mode);
+/* Compact label for the home screen: "USB", "NFC" or "BLE". */
+const char *zf_transport_mode_short_name(ZfTransportMode mode);
 const char *zf_fido2_profile_name(ZfFido2Profile profile);
 const char *zf_attestation_mode_name(ZfAttestationMode mode);

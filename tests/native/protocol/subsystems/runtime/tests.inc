@@ -376,4 +376,32 @@ static void test_transport_mode_switch_failure_preserves_persisted_mode(void) {
         ZfTransportModeUsbHid, ZfTransportModeNfc, &zf_transport_usb_hid_adapter);
     run_transport_mode_switch_failure_preserves_persisted_mode(
         ZfTransportModeNfc, ZfTransportModeUsbHid, &zf_transport_nfc_adapter);
+#if ZF_BLE_ENABLED
+    run_transport_mode_switch_failure_preserves_persisted_mode(
+        ZfTransportModeUsbHid, ZfTransportModeBle, &zf_transport_usb_hid_adapter);
+    run_transport_mode_switch_failure_preserves_persisted_mode(
+        ZfTransportModeBle, ZfTransportModeNfc, &zf_transport_ble_adapter);
+#endif
+}
+
+static void test_runtime_config_persist_round_trips_ble_mode(void) {
+    Storage storage = {0};
+    ZfRuntimeConfig saved = {0};
+    ZfRuntimeConfig loaded = {0};
+
+    test_storage_reset();
+    zf_runtime_config_load_defaults(&saved);
+    saved.transport_mode = ZfTransportModeBle;
+#if ZF_BLE_ENABLED
+    expect(zf_runtime_config_persist(&storage, &saved),
+           "persisting Bluetooth transport config should succeed");
+    zf_runtime_config_load(&storage, &loaded);
+    expect(loaded.transport_mode == ZfTransportModeBle,
+           "runtime config load should restore the persisted Bluetooth transport mode");
+#else
+    expect(zf_runtime_config_persist(&storage, &saved), "persisting writes the raw mode byte");
+    zf_runtime_config_load(&storage, &loaded);
+    expect(loaded.transport_mode == ZfTransportModeUsbHid,
+           "builds without Bluetooth fall back to the default transport");
+#endif
 }

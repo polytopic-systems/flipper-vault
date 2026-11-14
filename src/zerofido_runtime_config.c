@@ -482,6 +482,36 @@ bool zf_runtime_ctap_command_enabled(const ZerofidoApp *app, uint8_t cmd) {
     }
 }
 
+ZfTransportMode zf_runtime_config_next_transport_mode(ZfTransportMode mode) {
+    static const ZfTransportMode order[] = {ZfTransportModeUsbHid, ZfTransportModeNfc,
+                                            ZfTransportModeBle};
+    const size_t count = sizeof(order) / sizeof(order[0]);
+    size_t index = 0;
+
+    while (index < count && order[index] != mode) {
+        index++;
+    }
+    for (size_t step = 1; step <= count; ++step) {
+        ZfTransportMode candidate = order[(index + step) % count];
+        if (zf_transport_mode_is_valid((uint8_t)candidate)) {
+            return candidate;
+        }
+    }
+    return mode;
+}
+
+const char *zf_transport_mode_short_name(ZfTransportMode mode) {
+    switch (mode) {
+    case ZfTransportModeNfc:
+        return "NFC";
+    case ZfTransportModeBle:
+        return "BLE";
+    case ZfTransportModeUsbHid:
+    default:
+        return "USB";
+    }
+}
+
 const char *zf_transport_mode_name(ZfTransportMode mode) {
     switch (mode) {
     case ZfTransportModeNfc:

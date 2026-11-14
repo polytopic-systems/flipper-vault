@@ -80,7 +80,9 @@ hosts send the next request as soon as they see the reply.
 `ZF_BLE_ENABLED`) returns `ZfBleLinkStateOff`, `Advertising`, `Connected` (not yet encrypted) or
 `Secured` (encrypted, i.e. paired). It is lock-free and safe from any thread, including with
 `ui_mutex` held. `zerofido_ui_set_transport_connected()` is also called on connect/disconnect, as
-for USB.
+for USB. For the settings menu, `zf_runtime_config_next_transport_mode()` cycles
+USB HID -> NFC -> Bluetooth (skipping modes the build lacks), `zf_transport_mode_name()` gives
+"USB HID" / "NFC" / "Bluetooth" and `zf_transport_mode_short_name()` "USB" / "NFC" / "BLE".
 
 ## Firmware APIs used
 

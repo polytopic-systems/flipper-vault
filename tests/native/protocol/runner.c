@@ -1299,6 +1299,14 @@ const ZfTransportAdapterOps zf_transport_nfc_adapter = {
     .stop = test_transport_stop,
 };
 
+#if ZF_BLE_ENABLED
+const ZfTransportAdapterOps zf_transport_ble_adapter = {
+    .worker = test_transport_worker,
+    .worker_stack_size = 6 * 1024,
+    .stop = test_transport_stop,
+};
+#endif
+
 void zf_transport_stop(ZerofidoApp *app) {
     test_transport_stop(app);
 }
@@ -1547,6 +1555,7 @@ int main(void) {
     test_runtime_config_load_defaults_auto_accept_off();
     test_runtime_config_persist_round_trips_auto_accept_setting();
     test_runtime_config_persist_round_trips_transport_mode();
+    test_runtime_config_persist_round_trips_ble_mode();
     test_runtime_config_persist_round_trips_fido2_profile();
     test_runtime_config_persist_round_trips_attestation_mode();
     test_runtime_config_set_attestation_mode_updates_capabilities();

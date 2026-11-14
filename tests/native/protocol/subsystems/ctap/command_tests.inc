@@ -2622,6 +2622,15 @@ static void test_runtime_ble_capabilities_follow_build_flag(void) {
            "BLE mode support should follow ZF_BLE_ENABLED");
     expect(strcmp(zf_transport_mode_name(ZfTransportModeBle), "Bluetooth") == 0,
            "BLE transport should be named Bluetooth");
+    expect(strcmp(zf_transport_mode_short_name(ZfTransportModeBle), "BLE") == 0,
+           "BLE transport short name should be BLE");
+    expect(zf_runtime_config_next_transport_mode(ZfTransportModeUsbHid) == ZfTransportModeNfc,
+           "settings cycle should go from USB to NFC");
+    expect(zf_runtime_config_next_transport_mode(ZfTransportModeNfc) ==
+               (ZF_BLE_ENABLED ? ZfTransportModeBle : ZfTransportModeUsbHid),
+           "settings cycle should go from NFC to Bluetooth when built in, else USB");
+    expect(zf_runtime_config_next_transport_mode(ZfTransportModeBle) == ZfTransportModeUsbHid,
+           "settings cycle should go from Bluetooth back to USB");
 }
 
 static void test_get_info_experimental_2_1_advertises_pin_uv_auth_token(void) {
