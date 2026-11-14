@@ -15,11 +15,13 @@ ROOT = Path(__file__).resolve().parents[1]
 NATIVE_SOURCE = ROOT / "tests" / "native" / "protocol" / "runner.c"
 NATIVE_TRANSPORT_SOURCE = ROOT / "tests" / "native" / "transport_u2f" / "runner.c"
 NATIVE_CRYPTO_SOURCE = ROOT / "tests" / "native" / "crypto" / "runner.c"
+NATIVE_BLE_SOURCE = ROOT / "tests" / "native" / "ble" / "runner.c"
 NATIVE_INCLUDE = ROOT / "tests" / "native" / "include"
 NATIVE_BINARY = ROOT / ".tmp" / "native_protocol_regressions"
 NATIVE_PACKED_OFF_BINARY = ROOT / ".tmp" / "native_protocol_regressions_packed_off"
 NATIVE_TRANSPORT_BINARY = ROOT / ".tmp" / "native_transport_u2f_regressions"
 NATIVE_CRYPTO_BINARY = ROOT / ".tmp" / "native_crypto_regressions"
+NATIVE_BLE_BINARY = ROOT / ".tmp" / "native_ble_framing_regressions"
 POLICY_SOURCE = ROOT / "src" / "ctap" / "policy.c"
 
 
@@ -58,6 +60,21 @@ def main() -> None:
         ]
     )
     run([str(NATIVE_CRYPTO_BINARY)])
+    run(
+        [
+            compiler,
+            "-std=c11",
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            "-I",
+            str(ROOT / "src"),
+            str(NATIVE_BLE_SOURCE),
+            "-o",
+            str(NATIVE_BLE_BINARY),
+        ]
+    )
+    run([str(NATIVE_BLE_BINARY)])
     run(
         [
             compiler,
